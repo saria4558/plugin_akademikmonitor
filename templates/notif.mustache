@@ -1,0 +1,131 @@
+<div class="akademikmonitor">
+<div class="am-wrap">
+  {{> local_akademikmonitor/sidebar }}
+
+  <div class="am-content">
+      <div class="am-mobile-topbar">
+        <button type="button"
+                class="am-hamburger"
+                data-action="open-sidebar"
+                aria-label="Buka menu">
+          ☰
+        </button>
+        <div class="am-mobile-title">Menu Akademik</div>
+      </div>
+    <div class="am-breadcrumb">/ Pengaturan Notifikasi</div>
+    <h2 class="am-h1">Pengaturan Notifikasi</h2>
+    <div class="am-sub">Atur koneksi telegram dan aturan pengiriman notifikasi otomatis.</div>
+
+    <div class="am-card">
+      <div class="am-row" style="justify-content:space-between;">
+        <div style="flex:1;">
+          <div style="font-weight:700; margin-bottom:6px;">Koneksi Bot Telegram</div>
+          <label class="am-label">Token Bot</label>
+          <input class="am-input" id="am-token" value="{{bot_token}}" placeholder="123456:ABCDEF...">
+          <div class="am-help" id="am-token-status"></div>
+        </div>
+        <div style="display:flex; align-items:flex-end; gap:10px;">
+          <button class="am-btn am-btn-ghost" type="button" data-action="check-telegram">Cek Koneksi</button>
+          <button class="am-btn am-btn-primary" type="button" data-action="save-telegram">Simpan</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="am-card">
+      <div style="font-weight:700; margin-bottom:6px;">Notifikasi Otomatis</div>
+
+      <table class="am-table">
+        <thead>
+          <tr>
+            <th>Jenis Notifikasi</th>
+            <th>Jam</th>
+            <th>Trigger</th>
+            <th>Penerima</th>
+            <th>Aksi</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{#rules}}
+          <tr>
+            <td>{{label}}</td>
+            <td>{{send_time}}</td>
+            <td>H-{{offset_days}} ({{event_keyword}})</td>
+            <td>{{recipients}}</td>
+            <td>
+              <button class="am-btn am-btn-secondary" type="button"
+                data-action="edit-rule"
+                data-id="{{id}}"
+                data-label="{{label}}"
+                data-offset="{{offset_days}}"
+                data-time="{{send_time}}"
+                data-event="{{event_keyword}}"
+                data-recipients="{{recipients}}"
+              >edit</button>
+
+              <button class="am-btn am-btn-ghost" type="button"
+                data-action="toggle-rule"
+                data-id="{{id}}"
+              >{{toggle_text}}</button>
+
+              <span class="am-badge {{badge_class}}">{{badge_text}}</span>
+            </td>
+          </tr>
+          {{/rules}}
+          {{^rules}}
+          <tr><td colspan="5" style="color:#888;">Belum ada rule. Dummy harusnya dibuat saat install.</td></tr>
+          {{/rules}}
+        </tbody>
+      </table>
+    </div>
+
+    <input type="hidden" id="am-sesskey" value="{{sesskey}}">
+    <input type="hidden" id="am-ajaxurl" value="{{ajaxurl}}">
+
+    <!-- MODAL EDIT -->
+    <div class="am-modal-overlay" id="am-modal">
+      <div class="am-modal">
+        <div class="am-modal-header">
+          <h3 class="am-modal-title">Edit Notifikasi Otomatis</h3>
+          <button class="am-close" type="button" data-action="close-modal">✕</button>
+        </div>
+
+        <div class="am-grid">
+          <div>
+            <label class="am-label">Jenis Notifikasi</label>
+            <input class="am-input" id="m-label" disabled>
+          </div>
+
+          <div>
+            <label class="am-label">Trigger (H-berapa)</label>
+            <input class="am-input" id="m-offset" placeholder="contoh: 1 / 30">
+          </div>
+
+          <div>
+            <label class="am-label">Jam dikirim</label>
+            <input class="am-input" id="m-time" placeholder="07:00:00">
+            <div class="am-help">Format: HH:MM:SS</div>
+          </div>
+
+          <div>
+            <label class="am-label">Event (keyword)</label>
+            <input class="am-input" id="m-event" placeholder="deadline / uts / uas">
+          </div>
+
+          <div>
+            <label class="am-label">Penerima</label>
+            <div class="am-checkboxes" id="m-recipients">
+              <label><input type="checkbox" value="Siswa"> Siswa</label>
+              <label><input type="checkbox" value="Guru"> Guru</label>
+              <label><input type="checkbox" value="Wali Kelas"> Wali Kelas</label>
+            </div>
+          </div>
+
+          <button class="am-btn am-btn-primary" type="button" data-action="save-rule">Simpan</button>
+        </div>
+
+        <input type="hidden" id="m-id" value="">
+      </div>
+    </div>
+  </div>
+</div>
+</div>
