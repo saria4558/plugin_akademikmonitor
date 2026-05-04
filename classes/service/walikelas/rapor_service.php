@@ -1065,6 +1065,34 @@ class rapor_service {
         ]);
     }
 
+    public static function save_kokurikuler(int $userid, int $kelasid, int $semester, string $kokurikuler, int $waliid): void {
+        global $DB;
+
+        $existing = self::get_catatan($userid, $kelasid, $semester);
+
+        if ($existing) {
+            $existing->kokurikuler = $kokurikuler;
+            $existing->id_wali_kelas = $waliid;
+            $existing->timemodified = time();
+
+            $DB->update_record('rapor_catatan_akademik', $existing);
+            return;
+        }
+
+        $now = time();
+
+        $record = new \stdClass();
+        $record->id_siswa = $userid;
+        $record->id_kelas = $kelasid;
+        $record->semester = $semester;
+        $record->catatan = null;
+        $record->kokurikuler = $kokurikuler;
+        $record->id_wali_kelas = $waliid;
+        $record->timecreated = $now;
+        $record->timemodified = $now;
+
+        $DB->insert_record('rapor_catatan_akademik', $record);
+    }
     public static function get_kenaikan_kelas(int $userid, int $kelasid) {
         global $DB;
 
@@ -1567,6 +1595,7 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             'has_nilai_akademik' => !empty($nilaiakademik),
             'empty_nilai_akademik' => empty($nilaiakademik),
             'catatan' => $catatan->catatan ?? 'Belum ada catatan',
+            'kokurikuler' => $catatan->kokurikuler ?? 'Belum ada catatan kokurikuler',
             'keputusan' => $keputusan->keputusan ?? 'Belum ada keputusan',
             'sakit' => $ketidakhadiran->sakit ?? 0,
             'izin' => $ketidakhadiran->izin ?? 0,

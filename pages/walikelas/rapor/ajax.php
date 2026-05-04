@@ -1,5 +1,6 @@
 <?php
 define('AJAX_SCRIPT', true);
+
 require_once(__DIR__ . '/../../../../../config.php');
 
 require_login();
@@ -16,7 +17,7 @@ $action = required_param('action', PARAM_ALPHAEXT);
 
 global $USER;
 
-$waliid = (int)$USER->id;
+$waliid = (int) $USER->id;
 $semester = optional_param('semester', period_filter_service::get_selected_semester(), PARAM_INT);
 
 try {
@@ -27,6 +28,16 @@ try {
                 $kelasid,
                 $semester,
                 required_param('catatan', PARAM_TEXT),
+                $waliid
+            );
+            break;
+
+        case 'save_kokurikuler':
+            rapor_service::save_kokurikuler(
+                $userid,
+                $kelasid,
+                $semester,
+                required_param('kokurikuler', PARAM_TEXT),
                 $waliid
             );
             break;
@@ -47,20 +58,21 @@ try {
             rapor_service::save_kenaikan_kelas(
                 $userid,
                 $kelasid,
+                $semester,
                 required_param('keputusan', PARAM_TEXT),
                 $waliid
             );
             break;
 
         default:
-            throw new moodle_exception('Action tidak dikenal');
+            throw new \exception('Action tidak dikenal');
     }
 
     echo json_encode([
         'ok' => true,
         'message' => 'Data rapor berhasil disimpan',
     ]);
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     echo json_encode([
         'ok' => false,
         'message' => $e->getMessage(),

@@ -2,13 +2,11 @@
 require_once(__DIR__ . '/../../../../../config.php');
 
 require_login();
-
+global $CFG, $PAGE, $OUTPUT, $USER, $DB;
 use local_akademikmonitor\service\period_filter_service;
 use local_akademikmonitor\service\walikelas\rapor_service;
 
 require_once($CFG->libdir . '/accesslib.php');
-
-global $PAGE, $OUTPUT, $USER, $DB ;
 
 $userid = required_param('userid', PARAM_INT);
 $kelasidparam = optional_param('kelasid', 0, PARAM_INT);
@@ -39,8 +37,6 @@ $PAGE->set_pagelayout('standard');
 $PAGE->set_title('Detail Raport');
 $PAGE->set_heading('Detail Raport');
 
-// Admin/manager boleh lewat system context. Wali kelas boleh lewat course context kelasnya.
-// Selain itu, pastikan siswa memang anggota group kelas yang sedang dibuka.
 $studentingroup = $DB->record_exists('groups_members', [
     'groupid' => $kelasid,
     'userid' => $userid,
@@ -50,7 +46,7 @@ $canview = has_capability('local/akademikmonitor:viewrapor', $systemcontext)
     || has_capability('local/akademikmonitor:viewrapor', $coursecontext);
 
 if (!$studentingroup || !$canview) {
-    throw new required_capability_exception($coursecontext, 'local/akademikmonitor:viewrapor', 'nopermissions', '');
+    throw new \exception('nopermissions', 'error');
 }
 
 $periodfilterdata = period_filter_service::get_filter_ui_data(

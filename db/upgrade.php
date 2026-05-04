@@ -519,5 +519,27 @@ if ($oldversion < 2026040206) {
 
         upgrade_plugin_savepoint(true, 2026050403, 'local', 'akademikmonitor');
     }
+
+    if ($oldversion < 2026050501) {
+
+        $table = new xmldb_table('rapor_catatan_akademik');
+
+        $field = new xmldb_field(
+            'kokurikuler',
+            XMLDB_TYPE_TEXT,
+            null,
+            null,
+            null,
+            null,
+            null,
+            'catatan'
+        );
+
+        if ($dbman->table_exists($table) && !$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_plugin_savepoint(true, 2026050501, 'local', 'akademikmonitor');
+    }
     return true;
 }

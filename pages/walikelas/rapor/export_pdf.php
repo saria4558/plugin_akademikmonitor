@@ -50,6 +50,10 @@ $pkl = $data['pkl'] ?? [];
 $ekskul = $data['ekskul'] ?? [];
 $absen = $data['absen'];
 $catatan = $data['catatan'];
+$kokurikuler = trim((string)($catatan->kokurikuler ?? ''));
+if ($kokurikuler === '') {
+    $kokurikuler = '-';
+}
 $keputusan = $data['keputusan'];
 $walikelas = $data['walikelas'] ?? [
     'nama' => '-',
@@ -713,7 +717,16 @@ $html .= '
 
     <h3>Catatan Akademik</h3>
     <table>
-        <tr><td style="height:100px;">' . s($catatan->catatan ?? '-') . '</td></tr>
+        <tr>
+            <td style="height:100px;">' . nl2br(s($catatan->catatan ?? '-')) . '</td>
+        </tr>
+    </table>
+
+    <h3>Kokurikuler</h3>
+    <table>
+        <tr>
+            <td style="height:100px;">' . nl2br(s($kokurikuler)) . '</td>
+        </tr>
     </table>
 
     <h3>PKL</h3>
