@@ -11,23 +11,64 @@ class common_service {
     }
 
 
-    public static function get_generated_kelasid_from_courseid(int $courseid): int {
+    /**
+     * Membaca identitas kelas dari course hasil generate plugin.
+     *
+     * Format baru:
+     * - AM-TA{tahunajaranid}-K{kelasid}-KM{kurikulummapelid}-S{semester}
+     *
+     * Format lama:
+     * - AM-K{kelasid}-KM{kurikulummapelid}-S{semester}
+     *
+     * Fungsi ini dibuat di common_service supaya fitur wali kelas lain
+     * tidak perlu mengulang regex idnumber course.
+     */
+    public static function get_generated_course_info_from_courseid(int $courseid): array {
         global $DB;
 
         if ($courseid <= 0) {
-            return 0;
+            return [
+                'kelasid' => 0,
+                'tahunajaranid' => 0,
+                'semester' => 0,
+            ];
         }
 
-        $idnumber = (string)$DB->get_field('course', 'idnumber', ['id' => $courseid], IGNORE_MISSING);
+        $idnumber = trim((string)$DB->get_field('course', 'idnumber', ['id' => $courseid], IGNORE_MISSING));
         if ($idnumber === '') {
-            return 0;
+            return [
+                'kelasid' => 0,
+                'tahunajaranid' => 0,
+                'semester' => 0,
+            ];
         }
 
-        if (preg_match('/^AM-K(\d+)-KM(\d+)-S([12])$/', trim($idnumber), $matches)) {
-            return (int)$matches[1];
+        if (preg_match('/^AM-TA(\d+)-K(\d+)-KM(\d+)-S([12])$/', $idnumber, $matches)) {
+            return [
+                'kelasid' => (int)$matches[2],
+                'tahunajaranid' => (int)$matches[1],
+                'semester' => (int)$matches[4],
+            ];
         }
 
-        return 0;
+        if (preg_match('/^AM-K(\d+)-KM(\d+)-S([12])$/', $idnumber, $matches)) {
+            return [
+                'kelasid' => (int)$matches[1],
+                'tahunajaranid' => 0,
+                'semester' => (int)$matches[3],
+            ];
+        }
+
+        return [
+            'kelasid' => 0,
+            'tahunajaranid' => 0,
+            'semester' => 0,
+        ];
+    }
+
+    public static function get_generated_kelasid_from_courseid(int $courseid): int {
+        $info = self::get_generated_course_info_from_courseid($courseid);
+        return (int)$info['kelasid'];
     }
 
     public static function get_generated_kelasid_from_group(int $groupid): int {
@@ -44,64 +85,234 @@ class common_service {
 
         return self::get_generated_kelasid_from_courseid((int)$group->courseid);
     }
+private static function user_is_walikelas_for_group(int $userid, \stdClass $group): bool {
+    global $DB;
 
-    public static function get_group_walikelas(int $userid): array {
-        global $DB;
+    if ($userid <= 0 || empty($group->id)) {
+        return false;
+    }
 
-        $memberships = $DB->get_records('groups_members', ['userid' => $userid], 'groupid ASC', 'groupid');
-        if (!$memberships) {
-            return [];
+    /*
+     * Prioritas utama: data wali kelas dari tabel kelas.
+     *
+     * Ini yang paling benar untuk kasus kamu:
+     * - 2025/2026 user bisa menjadi wali kelas X RPL 1 lama.
+     * - 2026/2027 user belum tentu menjadi wali kelas X RPL 1 baru.
+     *
+     * Jadi jangan menebak wali kelas hanya dari group_members,
+     * karena guru mapel juga bisa masuk ke group yang sama.
+     */
+    $kelas = self::get_kelas_record_from_group((int)$group->id);
+
+    if ($kelas && property_exists($kelas, 'id_user') && (int)$kelas->id_user > 0) {
+        return (int)$kelas->id_user === (int)$userid;
+    }
+
+    /*
+     * Fallback untuk data lama:
+     * kalau tabel kelas belum punya id_user, cek role course.
+     *
+     * Moodle default:
+     * - editingteacher = guru yang bisa edit course.
+     * - teacher = non-editing teacher.
+     *
+     * Wali kelas seharusnya non-editing teacher, jadi yang dicek adalah teacher,
+     * bukan editingteacher.
+     */
+    $courseid = (int)($group->courseid ?? 0);
+
+    if ($courseid <= 0) {
+        return false;
+    }
+
+    $context = \context_course::instance($courseid, IGNORE_MISSING);
+
+    if (!$context) {
+        return false;
+    }
+
+    $roleshortnames = ['teacher', 'noneditingteacher'];
+    [$rolesql, $roleparams] = $DB->get_in_or_equal($roleshortnames, SQL_PARAMS_NAMED, 'rs');
+
+    $roleids = $DB->get_fieldset_select(
+        'role',
+        'id',
+        "shortname {$rolesql}",
+        $roleparams
+    );
+
+    if (!$roleids) {
+        return false;
+    }
+
+    $roleids = array_map('intval', $roleids);
+    [$roleidsql, $roleidparams] = $DB->get_in_or_equal($roleids, SQL_PARAMS_NAMED, 'rid');
+
+    $params = array_merge($roleidparams, [
+        'userid' => (int)$userid,
+        'contextid' => (int)$context->id,
+    ]);
+
+    return $DB->record_exists_select(
+        'role_assignments',
+        "userid = :userid
+         AND contextid = :contextid
+         AND roleid {$roleidsql}",
+        $params
+    );
+}
+public static function get_group_walikelas(int $userid): array {
+    global $DB;
+
+    if ($userid <= 0) {
+        return [];
+    }
+
+    /*
+     * Ambil group yang diikuti user.
+     *
+     * Tapi ini baru kandidat, belum tentu wali kelas.
+     * Guru mapel juga bisa masuk group, jadi nanti tetap difilter lagi
+     * memakai user_is_walikelas_for_group().
+     */
+    $memberships = $DB->get_records(
+        'groups_members',
+        ['userid' => $userid],
+        'groupid ASC',
+        'groupid'
+    );
+
+    if (!$memberships) {
+        return [];
+    }
+
+    $groupids = array_map('intval', array_keys($memberships));
+
+    $groups = $DB->get_records_list(
+        'groups',
+        'id',
+        $groupids,
+        'id ASC',
+        'id, name, courseid'
+    );
+
+    if (!$groups) {
+        return [];
+    }
+
+    $bykelas = [];
+
+    foreach ($groups as $g) {
+        /*
+         * Ini filter yang memperbaiki bug kamu.
+         *
+         * Sebelumnya:
+         * semua group yang diikuti user dianggap wali kelas.
+         *
+         * Sekarang:
+         * group hanya dihitung kalau user benar-benar wali kelas
+         * berdasarkan tabel kelas.id_user atau fallback role teacher.
+         */
+        if (!self::user_is_walikelas_for_group($userid, $g)) {
+            continue;
         }
 
-        $groupids = array_map('intval', array_keys($memberships));
-        $groups = $DB->get_records_list('groups', 'id', $groupids, 'id ASC', 'id, name, courseid');
-        if (!$groups) {
-            return [];
+        $name = (string)$g->name;
+        $courseid = (int)($g->courseid ?? 0);
+        $generatedkelasid = self::get_generated_kelasid_from_courseid($courseid);
+
+        /*
+         * Course hasil generate punya idnumber:
+         * AM-TA{tahunajaranid}-K{kelasid}-KM{mapelid}-S{semester}
+         *
+         * Satu kelas punya banyak course/mapel, jadi harus dedupe berdasarkan kelas.
+         */
+        $key = $generatedkelasid > 0 ? ('kelas:' . $generatedkelasid) : ('name:' . $name);
+
+        if (!isset($bykelas[$key])) {
+            $bykelas[$key] = (object)[
+                'id' => (int)$g->id,
+                'name' => $name,
+                'courseid' => $courseid,
+                'generatedkelasid' => $generatedkelasid,
+            ];
+            continue;
         }
 
-        $bykelas = [];
-        foreach ($groups as $g) {
-            $name = (string)$g->name;
-            $courseid = (int)($g->courseid ?? 0);
-            $generatedkelasid = self::get_generated_kelasid_from_courseid($courseid);
+        $current = $bykelas[$key];
+        $currentisgenerated = !empty($current->generatedkelasid);
+        $newisgenerated = $generatedkelasid > 0;
 
-            // Course hasil generate punya idnumber AM-K{idkelas}-KM{idmapel}-S{semester}.
-            // Jadi dedupe jangan hanya berdasarkan nama group, karena setiap mapel membuat group dengan nama sama.
-            $key = $generatedkelasid > 0 ? ('kelas:' . $generatedkelasid) : ('name:' . $name);
+        /*
+         * Kalau ada pilihan antara group manual dan group hasil generate,
+         * utamakan group hasil generate.
+         */
+        if (
+            (!$currentisgenerated && $newisgenerated) ||
+            ($currentisgenerated === $newisgenerated && (int)$g->id < (int)$current->id)
+        ) {
+            $bykelas[$key] = (object)[
+                'id' => (int)$g->id,
+                'name' => $name,
+                'courseid' => $courseid,
+                'generatedkelasid' => $generatedkelasid,
+            ];
+        }
+    }
 
-            if (!isset($bykelas[$key])) {
-                $bykelas[$key] = (object)[
-                    'id' => (int)$g->id,
-                    'name' => $name,
-                    'courseid' => $courseid,
-                    'generatedkelasid' => $generatedkelasid,
-                ];
+    $out = [];
+
+    foreach ($bykelas as $g) {
+        $out[(int)$g->id] = $g;
+    }
+
+    ksort($out);
+
+    return $out;
+}
+
+    /**
+     * Ambil daftar kelas wali kelas sesuai tahun ajaran terpilih.
+     *
+     * Kenapa tidak langsung memakai get_group_walikelas()?
+     * Karena satu wali bisa pernah menjadi wali di beberapa tahun ajaran.
+     * Kalau tidak difilter, halaman wali kelas bisa mengambil group/course lama,
+     * misalnya X RPL 1 tahun 2025/2026 tetap muncul saat filter 2026/2027.
+     */
+    public static function get_group_walikelas_by_tahunajaran(int $userid, int $tahunajaranid = 0): array {
+        $groups = self::get_group_walikelas($userid);
+
+        if ($tahunajaranid <= 0 || !$groups) {
+            return $groups;
+        }
+
+        $filtered = [];
+
+        foreach ($groups as $key => $group) {
+            $groupid = (int)($group->id ?? 0);
+
+            if ($groupid <= 0) {
                 continue;
             }
 
-            $current = $bykelas[$key];
-            $currentisgenerated = !empty($current->generatedkelasid);
-            $newisgenerated = $generatedkelasid > 0;
-
-            // Kalau ada pilihan antara group manual dan group hasil generate, utamakan group hasil generate.
-            if ((!$currentisgenerated && $newisgenerated) ||
-                    ($currentisgenerated === $newisgenerated && (int)$g->id < (int)$current->id)) {
-                $bykelas[$key] = (object)[
-                    'id' => (int)$g->id,
-                    'name' => $name,
-                    'courseid' => $courseid,
-                    'generatedkelasid' => $generatedkelasid,
-                ];
+            if (!self::group_matches_tahunajaran($groupid, $tahunajaranid)) {
+                continue;
             }
+
+            $filtered[$key] = $group;
         }
 
-        $out = [];
-        foreach ($bykelas as $g) {
-            $out[$g->id] = $g;
+        return $filtered;
+    }
+
+    public static function get_first_group_walikelas_by_tahunajaran(int $userid, int $tahunajaranid = 0): ?\stdClass {
+        $groups = self::get_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
+
+        if (!$groups) {
+            return null;
         }
 
-        ksort($out);
-        return $out;
+        return reset($groups) ?: null;
     }
 
     public static function get_first_group_walikelas(int $userid): ?\stdClass {
@@ -182,8 +393,147 @@ class common_service {
         return $members;
     }
 
-    public static function get_sidebar_data(string $active = ''): array {
+    public static function get_kelas_record_from_group(int $groupid): ?\stdClass {
+        global $DB;
+
+        if ($groupid <= 0) {
+            return null;
+        }
+
+        $group = $DB->get_record('groups', ['id' => $groupid], 'id, name, courseid', IGNORE_MISSING);
+        if (!$group) {
+            return null;
+        }
+
+        $generatedkelasid = self::get_generated_kelasid_from_courseid((int)$group->courseid);
+        if ($generatedkelasid > 0) {
+            $kelas = $DB->get_record(
+                'kelas',
+                ['id' => $generatedkelasid],
+                'id, nama, tingkat, id_jurusan, id_tahun_ajaran, id_user',
+                IGNORE_MISSING
+            );
+
+            if ($kelas) {
+                return $kelas;
+            }
+        }
+
+        return null;
+    }
+
+    public static function is_tingkat_xii(string $tingkat): bool {
+        $tingkat = strtoupper(trim($tingkat));
+        $tingkat = preg_replace('/\s+/', '', $tingkat);
+
+        return in_array($tingkat, ['XII', '12'], true);
+    }
+
+    public static function is_group_kelas_xii(int $groupid): bool {
+        $kelas = self::get_kelas_record_from_group($groupid);
+        if (!$kelas) {
+            return false;
+        }
+
+        return self::is_tingkat_xii((string)($kelas->tingkat ?? ''));
+    }
+
+public static function group_matches_tahunajaran(int $groupid, int $tahunajaranid): bool {
+    global $DB;
+
+    if ($tahunajaranid <= 0) {
+        return true;
+    }
+
+    if ($groupid <= 0) {
+        return false;
+    }
+
+    /*
+     * Prioritas utama tetap tabel kelas.
+     */
+    $kelas = self::get_kelas_record_from_group($groupid);
+
+    if ($kelas) {
+        return (int)($kelas->id_tahun_ajaran ?? 0) === (int)$tahunajaranid;
+    }
+
+    /*
+     * Fallback: baca langsung dari idnumber course.
+     * Format baru:
+     * AM-TA{tahunajaranid}-K{kelasid}-KM{mapelid}-S{semester}
+     */
+    $group = $DB->get_record(
+        'groups',
+        ['id' => $groupid],
+        'id, courseid',
+        IGNORE_MISSING
+    );
+
+    if (!$group || empty($group->courseid)) {
+        return false;
+    }
+
+    $info = self::get_generated_course_info_from_courseid((int)$group->courseid);
+
+    if (!empty($info['tahunajaranid'])) {
+        return (int)$info['tahunajaranid'] === (int)$tahunajaranid;
+    }
+
+    /*
+     * Kalau tidak bisa dibuktikan group ini milik tahun ajaran yang dipilih,
+     * jangan tampilkan. Ini lebih aman supaya data tahun lain tidak bocor.
+     */
+    return false;
+}
+
+    public static function wali_has_kelas_xii(int $userid, int $tahunajaranid = 0): bool {
+        $groups = self::get_group_walikelas($userid);
+        foreach ($groups as $group) {
+            $groupid = (int)$group->id;
+            if (!self::group_matches_tahunajaran($groupid, $tahunajaranid)) {
+                continue;
+            }
+
+            if (self::is_group_kelas_xii($groupid)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function filter_groups_kelas_xii(array $groups, int $tahunajaranid = 0): array {
+        $out = [];
+
+        foreach ($groups as $key => $group) {
+            $groupid = (int)($group->id ?? 0);
+            if ($groupid <= 0) {
+                continue;
+            }
+
+            if (!self::group_matches_tahunajaran($groupid, $tahunajaranid)) {
+                continue;
+            }
+
+            if (!self::is_group_kelas_xii($groupid)) {
+                continue;
+            }
+
+            $out[$key] = $group;
+        }
+
+        return $out;
+    }
+
+    public static function get_sidebar_data(string $active = '', int $userid = 0, int $tahunajaranid = 0): array {
+        $showpklmenu = true;
+        if ($userid > 0) {
+            $showpklmenu = self::wali_has_kelas_xii($userid, $tahunajaranid);
+        }
+
         return [
+            'show_pkl_menu' => $showpklmenu,
             'is_dashboard' => ($active === 'dashboard'),
             'is_monitoring_kelas' => ($active === 'monitoring'),
             'is_ekskul_siswa' => ($active === 'ekskul'),

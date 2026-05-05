@@ -27,23 +27,69 @@ class monitoring_service {
         /*
          * Jalur utama untuk course hasil generate rombel.
          *
-         * Pola idnumber:
-         * AM-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+         * Plugin kamu punya 2 kemungkinan format idnumber:
          *
+         * Format lama:
+         * AM-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
          * Contoh:
          * AM-K6-KM83-S1
+         *
+         * Format baru:
+         * AM-TA{id_tahun_ajaran}-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+         * Contoh:
+         * AM-TA2-K6-KM83-S1
+         *
+         * Kalau hanya membaca format lama, course yang dibuat dengan format baru
+         * tidak akan muncul di monitoring.
          */
         if ($kelasid > 0) {
-            $pattern = 'AM-K' . $kelasid . '-KM%-S%';
+            $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+
+            $conditions = [];
+            $params = [];
+
+            /*
+             * Pattern format lama.
+             */
+            $oldpattern = 'AM-K' . $kelasid . '-KM%-S%';
 
             if (in_array($semester, [1, 2], true)) {
-                $pattern = 'AM-K' . $kelasid . '-KM%-S' . $semester;
+                $oldpattern = 'AM-K' . $kelasid . '-KM%-S' . $semester;
             }
+
+            $conditions[] = $DB->sql_like('idnumber', ':oldpattern', false);
+            $params['oldpattern'] = $oldpattern;
+
+            /*
+             * Pattern format baru.
+             *
+             * Kalau tahun ajaran aktif/terpilih ada, kita pakai yang spesifik:
+             * AM-TA2-K6-KM%-S1
+             *
+             * Kalau tidak ada tahun ajaran, fallback ke:
+             * AM-TA%-K6-KM%-S1
+             */
+            if ($tahunajaranid > 0) {
+                $newpattern = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S%';
+
+                if (in_array($semester, [1, 2], true)) {
+                    $newpattern = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S' . $semester;
+                }
+            } else {
+                $newpattern = 'AM-TA%-K' . $kelasid . '-KM%-S%';
+
+                if (in_array($semester, [1, 2], true)) {
+                    $newpattern = 'AM-TA%-K' . $kelasid . '-KM%-S' . $semester;
+                }
+            }
+
+            $conditions[] = $DB->sql_like('idnumber', ':newpattern', false);
+            $params['newpattern'] = $newpattern;
 
             $courses = $DB->get_records_select(
                 'course',
-                $DB->sql_like('idnumber', ':idnumber', false),
-                ['idnumber' => $pattern],
+                '(' . implode(' OR ', $conditions) . ')',
+                $params,
                 'fullname ASC, id ASC',
                 'id, fullname, shortname, idnumber'
             );
@@ -147,6 +193,7 @@ class monitoring_service {
                     'id' => $courseid,
                     'fullname' => (string)$course->fullname,
                     'shortname' => (string)($course->shortname ?? ''),
+                    'idnumber' => (string)($course->idnumber ?? ''),
                     'nama_mapel' => self::clean_mapel_name($mapelname),
                     'kktp' => $kktp,
                 ];
@@ -198,6 +245,7 @@ class monitoring_service {
                 'id' => (int)$c->id,
                 'fullname' => (string)$c->fullname,
                 'shortname' => (string)($c->shortname ?? ''),
+                'idnumber' => (string)($c->idnumber ?? ''),
                 'nama_mapel' => self::clean_mapel_name((string)$c->fullname),
                 'kktp' => 0,
             ];
@@ -413,12 +461,33 @@ class monitoring_service {
         int $semester = 0,
         int $tahunajaranid = 0
     ): array {
-        $data = common_service::get_sidebar_data('monitoring');
+        if ($semester <= 0) {
+            $semester = period_filter_service::get_selected_semester();
+        }
 
-        $group = common_service::get_first_group_walikelas($userid);
+        if ($tahunajaranid <= 0) {
+            $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+        }
+
+        /*
+         * Penting:
+         * Sidebar harus dipanggil dengan userid dan tahunajaranid.
+         * Kalau tidak, show_pkl_menu bisa salah dan menu PKL tetap muncul
+         * di halaman monitoring.
+         */
+        $data = common_service::get_sidebar_data('monitoring', $userid, $tahunajaranid);
+
+        $group = common_service::get_first_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
 
         if (!$group) {
             $data['nokelas'] = true;
+
+            $data += period_filter_service::build_filter_data();
+            $data += period_filter_service::get_filter_ui_data(
+                '/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php',
+                ['courseid' => $courseid]
+            );
+
             return $data;
         }
 
@@ -454,6 +523,7 @@ class monitoring_service {
         }
 
         $data['kelas'] = (string)$group->name;
+
         $data['mapel'] = array_map(static function($m) {
             return [
                 'id' => (int)$m->id,
@@ -466,7 +536,10 @@ class monitoring_service {
         $data['selected_mapel_name'] = $selectedmapelname;
         $data['selectedsemester'] = $semester;
         $data['selectedtahunajaranid'] = $tahunajaranid;
-
+        $data['selected_tahunajaranid'] = $tahunajaranid;
+        $data['caneditperiod'] = period_filter_service::can_edit_tahunajaran($tahunajaranid);
+        $data['readonlyperiod'] = !$data['caneditperiod'];
+        
         $data += period_filter_service::build_filter_data();
         $data += period_filter_service::get_filter_ui_data(
             '/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php',

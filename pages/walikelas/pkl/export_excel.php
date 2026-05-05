@@ -17,7 +17,11 @@ $semester = optional_param('semester', period_filter_service::get_selected_semes
 $tahunajaranid = optional_param('tahunajaranid', period_filter_service::get_selected_tahunajaranid(), PARAM_INT);
 
 if ($kelasid <= 0) {
-    throw new moodle_exception('Kelas tidak valid');
+    throw new \exception('Kelas tidak valid');
+}
+
+if (!common_service::is_group_kelas_xii($kelasid)) {
+    throw new \exception('Export PKL hanya tersedia untuk kelas XII');
 }
 
 if (!in_array((int)$semester, [1, 2], true)) {

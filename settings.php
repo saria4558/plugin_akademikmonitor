@@ -106,6 +106,39 @@ if ($hassiteconfig) {
         date('Y'),
         PARAM_INT
     ));
+    
+    // Gambar rapor.
+    $settings->add(new admin_setting_heading(
+        'local_akademikmonitor/rapor_image_heading',
+        'Gambar Rapor',
+        'Upload gambar yang dipakai pada export PDF rapor. Logo sampul dan watermark dipisah agar bisa memakai gambar berbeda.'
+    ));
+
+    $settings->add(new admin_setting_configstoredfile(
+        'local_akademikmonitor/rapor_cover_logo',
+        'Logo sampul rapor',
+        'Upload logo yang tampil pada halaman sampul rapor. Format yang disarankan: PNG/JPG/JPEG.',
+        'rapor_cover_logo',
+        0,
+        [
+            'maxfiles' => 1,
+            'accepted_types' => ['.png', '.jpg', '.jpeg'],
+            'subdirs' => 0,
+        ]
+    ));
+
+    $settings->add(new admin_setting_configstoredfile(
+        'local_akademikmonitor/rapor_watermark',
+        'Watermark rapor',
+        'Upload gambar watermark yang tampil samar di halaman rapor. Bisa berbeda dari logo sampul.',
+        'rapor_watermark',
+        0,
+        [
+            'maxfiles' => 1,
+            'accepted_types' => ['.png', '.jpg', '.jpeg'],
+            'subdirs' => 0,
+        ]
+    ));
 
     $ADMIN->add('localplugins', $settings);
 }

@@ -21,16 +21,22 @@
       <div class="am-sub">
         Kelola data ekstrakurikuler siswa untuk kelas {{nama}}.
       </div>
-      {{#periodfilter}}
-        {{> local_akademikmonitor/walikelas/period_filter}}
-      {{/periodfilter}}
+
+      {{#readonlyperiod}}
+      <div class="am-alert am-alert-info">
+        Tahun ajaran ini berada dalam mode arsip. Data ekstrakurikuler dapat dilihat, tetapi tidak dapat diubah.
+      </div>
+      {{/readonlyperiod}}
+
       <div class="am-toolbar">
         <div class="am-toolbar-left">
+          {{#caneditperiod}}
           <button type="button"
                   class="am-btn am-btn-primary"
                   data-action="open-import">
             Import CSV
           </button>
+          {{/caneditperiod}}
 
           <a class="am-btn am-btn-template"
              href="/local/akademikmonitor/pages/walikelas/ekskul/download_template.php">
@@ -43,6 +49,7 @@
           </a>
         </div>
 
+        {{#caneditperiod}}
         <div class="am-actions">
           <button type="button"
                   class="am-btn am-btn-primary"
@@ -51,6 +58,7 @@
             Tambah Peserta Ekskul
           </button>
         </div>
+        {{/caneditperiod}}
       </div>
 
       <div class="am-card">
@@ -82,6 +90,7 @@
                   <td data-label="Keterangan">{{keterangan}}</td>
                   <td data-label="Aksi">
                     <div class="am-row-actions">
+                      {{#caneditperiod}}
                       <button class="am-btn am-btn-edit"
                               type="button"
                               data-action="edit"
@@ -94,6 +103,7 @@
                               data-semester="{{semester}}">
                         Edit
                       </button>
+                      {{/caneditperiod}}
                     </div>
                   </td>
                 </tr>
@@ -116,6 +126,7 @@
       <input type="hidden" id="am-ajaxurl" value="{{ajaxurl}}">
       <input type="hidden" id="am-sesskey" value="{{sesskey}}">
 
+      {{#caneditperiod}}
       <div class="am-modal-overlay" id="am-modal">
         <div class="am-modal">
           <div class="am-modal-header">
@@ -232,6 +243,7 @@
           </form>
         </div>
       </div>
+      {{/caneditperiod}}
 
     </div>
   </div>

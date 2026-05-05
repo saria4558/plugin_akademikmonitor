@@ -13,24 +13,31 @@
         <div class="am-mobile-title">Menu Akademik</div>
       </div>
 
-
-
       {{#kelas}}
       <div class="am-breadcrumb">/ PKL Siswa</div>
       <h2 class="am-h1">PKL Siswa</h2>
+
       <div class="am-sub">
         Kelola data PKL siswa untuk kelas {{nama}}.
       </div>
-      {{#periodfilter}}
-        {{> local_akademikmonitor/walikelas/period_filter}}
-      {{/periodfilter}}
+
+
+
+      {{#readonlyperiod}}
+      <div class="am-alert am-alert-info">
+        Tahun ajaran ini berada dalam mode arsip. Data PKL dapat dilihat, tetapi tidak dapat diubah.
+      </div>
+      {{/readonlyperiod}}
+
       <div class="am-toolbar">
         <div class="am-toolbar-left">
+          {{#caneditperiod}}
           <button type="button"
                   class="am-btn am-btn-primary"
                   data-action="open-import">
             Import CSV
           </button>
+          {{/caneditperiod}}
 
           <a class="am-btn am-btn-template"
              href="/local/akademikmonitor/pages/walikelas/pkl/download_template.php">
@@ -43,6 +50,7 @@
           </a>
         </div>
 
+        {{#caneditperiod}}
         <div class="am-actions">
           <button type="button"
                   class="am-btn am-btn-primary"
@@ -51,6 +59,7 @@
             Tambah PKL Siswa
           </button>
         </div>
+        {{/caneditperiod}}
       </div>
 
       <div class="am-card">
@@ -70,6 +79,7 @@
                 <th>Aksi</th>
               </tr>
             </thead>
+
             <tbody>
               {{#siswa}}
                 {{#pkllist}}
@@ -88,6 +98,7 @@
                   <td data-label="Nilai">{{nilai}}</td>
                   <td data-label="Aksi">
                     <div class="am-row-actions">
+                      {{#caneditperiod}}
                       <button class="am-btn am-btn-edit"
                               type="button"
                               data-action="edit"
@@ -102,6 +113,7 @@
                               data-semester="{{semester}}">
                         Edit
                       </button>
+                      {{/caneditperiod}}
                     </div>
                   </td>
                 </tr>
@@ -119,11 +131,11 @@
           </table>
         </div>
       </div>
-      {{/kelas}}
 
       <input type="hidden" id="am-ajaxurl" value="{{ajaxurl}}">
       <input type="hidden" id="am-sesskey" value="{{sesskey}}">
 
+      {{#caneditperiod}}
       <div class="am-modal-overlay" id="am-modal">
         <div class="am-modal">
           <div class="am-modal-header">
@@ -178,11 +190,15 @@
           <div class="am-modal-actions">
             <button class="am-btn am-btn-ghost"
                     type="button"
-                    data-action="close-modal">Batal</button>
+                    data-action="close-modal">
+              Batal
+            </button>
 
             <button class="am-btn am-btn-primary"
                     type="button"
-                    data-action="save_pkl">Simpan</button>
+                    data-action="save_pkl">
+              Simpan
+            </button>
           </div>
 
           <input type="hidden" id="m-pklid" value="">
@@ -207,6 +223,7 @@
             <input type="hidden" name="sesskey" value="{{sesskey}}">
             <input type="hidden" name="kelasid" value="{{currentkelasid}}">
             <input type="hidden" name="semester" value="{{selectedsemester}}">
+            <input type="hidden" name="tahunajaranid" value="{{selected_tahunajaranid}}">
 
             <div class="am-field">
               <label class="am-label">Pilih File CSV</label>
@@ -220,15 +237,31 @@
             <div class="am-modal-actions">
               <button type="button"
                       class="am-btn am-btn-ghost"
-                      data-action="close-import">Batal</button>
+                      data-action="close-import">
+                Batal
+              </button>
 
               <button type="submit"
-                      class="am-btn am-btn-primary">Upload & Import</button>
+                      class="am-btn am-btn-primary">
+                Upload & Import
+              </button>
             </div>
           </form>
         </div>
       </div>
+      {{/caneditperiod}}
+      {{/kelas}}
 
+      {{#nokelas}}
+      <div class="am-breadcrumb">/ PKL Siswa</div>
+      <h2 class="am-h1">PKL Siswa</h2>
+
+      <div class="am-card">
+        <div class="am-empty-state">
+          {{only_xii_message}}
+        </div>
+      </div>
+      {{/nokelas}}
     </div>
   </div>
 </div>

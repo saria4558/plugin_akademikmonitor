@@ -45,9 +45,6 @@ $data = ekskul_service::get_page_data(
 );
 
 $data += period_filter_service::build_filter_data();
-$data += period_filter_service::get_filter_ui_data(
-    '/local/akademikmonitor/pages/walikelas/ekskul/ekskul.php'
-);
 
 echo $OUTPUT->header();
 

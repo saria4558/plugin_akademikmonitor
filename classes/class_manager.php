@@ -187,22 +187,35 @@ class class_manager {
         $DB->update_record('kelas', $kelas);
     }
 
-    public static function luluskan(\stdClass $kelas): array {
-        global $DB;
-        $columns = $DB->get_columns('kelas');
-        if (isset($columns['status'])) {
-            $kelas->status = 'lulus';
-            if (isset($columns['timemodified'])) {
-                $kelas->timemodified = time();
-            }
-            $DB->update_record('kelas', $kelas);
+public static function luluskan(\stdClass $kelas): array {
+    $oldids = get_config('local_akademikmonitor', 'kelas_lulus_ids');
+
+    $ids = [];
+
+    if (!empty($oldids)) {
+        $decoded = json_decode((string)$oldids, true);
+
+        if (is_array($decoded)) {
+            $ids = array_map('intval', $decoded);
         }
-        return [
-            'status' => 'lulus',
-            'oldclassid' => (int)$kelas->id,
-            'newclassid' => 0,
-            'nexttingkat' => 'LULUS',
-            'copied' => 0,
-        ];
     }
+
+    $kelasid = (int)$kelas->id;
+
+    if ($kelasid > 0 && !in_array($kelasid, $ids, true)) {
+        $ids[] = $kelasid;
+    }
+
+    $ids = array_values(array_unique(array_filter($ids)));
+
+    set_config('kelas_lulus_ids', json_encode($ids), 'local_akademikmonitor');
+
+    return [
+        'status' => 'lulus',
+        'oldclassid' => $kelasid,
+        'newclassid' => 0,
+        'nexttingkat' => 'LULUS',
+        'copied' => 0,
+    ];
+}
 }

@@ -46,7 +46,8 @@ $ringkasanranking = $data['ringkasan_ranking'] ?? [
     'total_siswa' => 0,
 ];
 
-$pkl = $data['pkl'] ?? [];
+$showpkl = !empty($data['show_pkl']);
+$pkl = $showpkl ? ($data['pkl'] ?? []) : [];
 $ekskul = $data['ekskul'] ?? [];
 $absen = $data['absen'];
 $catatan = $data['catatan'];
@@ -72,11 +73,39 @@ $tahuncoverdefault = $schoolconfig['tahuncoverdefault'] ?? date('Y');
 // $namakelas = $course->fullname ?? '-';
 $tanggalunduh = rapor_service::format_tanggal_indo(date('Y-m-d'));
 
-$logopath = $CFG->dirroot . '/local/akademikmonitor/pix/logo.jpg';
-$logosrc = '';
+$coverlogosrc = $schoolconfig['coverlogosrc'] ?? '';
+$watermarksrc = $schoolconfig['watermarksrc'] ?? '';
 
-if (file_exists($logopath)) {
-    $logosrc = 'data:image/jpeg;base64,' . base64_encode(file_get_contents($logopath));
+/*
+ * Fallback terakhir.
+ *
+ * Ini menjaga agar export PDF lama tetap aman walaupun admin belum upload
+ * logo sampul atau watermark dari halaman pengaturan plugin.
+ */
+if ($coverlogosrc === '' || $watermarksrc === '') {
+    $fallbacklogo = '';
+
+    foreach (['logo.jpg', 'logo.jpeg', 'logo.png'] as $filename) {
+        $path = $CFG->dirroot . '/local/akademikmonitor/pix/' . $filename;
+
+        if (!file_exists($path)) {
+            continue;
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $mimetype = ($extension === 'png') ? 'image/png' : 'image/jpeg';
+
+        $fallbacklogo = 'data:' . $mimetype . ';base64,' . base64_encode(file_get_contents($path));
+        break;
+    }
+
+    if ($coverlogosrc === '') {
+        $coverlogosrc = $fallbacklogo;
+    }
+
+    if ($watermarksrc === '') {
+        $watermarksrc = $coverlogosrc;
+    }
 }
 
 $jumlahnilai = number_format((float)($ringkasanranking['jumlah'] ?? 0), 0, ',', '.');
@@ -339,13 +368,13 @@ $html = '
 </style>
 
 <div class="watermark">
-    <img src="' . $logosrc . '" width="300">
+    ' . ($watermarksrc !== '' ? '<img src="' . $watermarksrc . '" width="300">' : '') . '
 </div>
 
 <div class="cover-page">
     <div class="cover-box">
         <div class="cover-logo">
-            <img src="' . $logosrc . '">
+            ' . ($coverlogosrc !== '' ? '<img src="' . $coverlogosrc . '">' : '') . '
         </div>
 
         <div class="cover-title">
@@ -373,7 +402,7 @@ $html = '
 $html .= '
 <div class="page-break">
     <div class="watermark">
-        <img src="' . $logosrc . '" width="300">
+        ' . ($watermarksrc !== '' ? '<img src="' . $watermarksrc . '" width="300">' : '') . '
     </div>
 
     <div class="datadiri-title">KETERANGAN TENTANG DIRI PESERTA DIDIK</div>
@@ -707,7 +736,7 @@ $html .= '
                 <table>
                     <tr><td class="label">Program Keahlian</td><td>: ' . s($jurusan) . '</td></tr>
                     <tr><td>Kelas</td><td>: ' . s($namakelas) . '</td></tr>
-                    <tr><td>Fase</td><td>: ' . s($profile->fase ?? '-') . '</td></tr>
+                    <tr><td>Fase</td><td>: ' . s($fase) . '</td></tr>
                     <tr><td>Semester</td><td>: ' . s($semesterdefault) . '</td></tr>
                     <tr><td>Tahun Pelajaran</td><td>: ' . s($tahunpelajarandefault) . '</td></tr>
                 </table>
@@ -729,30 +758,36 @@ $html .= '
         </tr>
     </table>
 
+';
+
+if ($showpkl) {
+    $html .= '
     <h3>PKL</h3>
     <table>
         <tr><th>No</th><th>Mitra</th><th>Nilai</th></tr>';
 
-if (!empty($pkl)) {
-    $no = 1;
-    foreach ($pkl as $item) {
-        $html .= '
+    if (!empty($pkl)) {
+        $no = 1;
+        foreach ($pkl as $item) {
+            $html .= '
         <tr>
             <td class="text-center">' . s((string)$no++) . '</td>
             <td>' . s($item->nama ?? '-') . '</td>
             <td class="text-center">' . s($item->nilai ?? '-') . '</td>
         </tr>';
-    }
-} else {
-    $html .= '
+        }
+    } else {
+        $html .= '
         <tr>
             <td colspan="3" class="text-center">Belum ada data PKL.</td>
         </tr>';
+    }
+
+    $html .= '
+    </table>';
 }
 
 $html .= '
-    </table>
-
     <h3>Ekstrakurikuler</h3>
     <table>
         <tr><th>No</th><th>Kegiatan</th><th>Predikat</th></tr>';

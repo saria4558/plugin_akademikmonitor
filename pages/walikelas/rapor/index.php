@@ -25,9 +25,9 @@ $PAGE->requires->css('/local/akademikmonitor/css/styles.css');
 $PAGE->requires->js_call_amd('local_akademikmonitor/sidebar', 'init');
 
 $data = rapor_service::get_page_data((int)$USER->id, $semester, $tahunajaranid);
-$data['periodfilter'] = period_filter_service::get_filter_ui_data(
-    '/local/akademikmonitor/pages/walikelas/rapor/index.php'
-);
+// $data['periodfilter'] = period_filter_service::get_filter_ui_data(
+//     '/local/akademikmonitor/pages/walikelas/rapor/index.php'
+// );
 
 echo $OUTPUT->header();
 

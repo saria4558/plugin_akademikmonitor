@@ -1,9 +1,9 @@
 <?php
 namespace local_akademikmonitor\service\walikelas;
 
-defined('MOODLE_INTERNAL') || die();
+use local_akademikmonitor\service\period_filter_service;
 
-require_once($CFG->libdir . '/enrollib.php');
+defined('MOODLE_INTERNAL') || die();
 
 class dashboard_service {
 
@@ -12,17 +12,27 @@ class dashboard_service {
 
         require_once($CFG->libdir . '/enrollib.php');
 
-        $data = common_service::get_sidebar_data('dashboard');
+        $semester = period_filter_service::get_selected_semester();
+        $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+
+        /*
+         * Sidebar harus dikirim dengan userid dan tahunajaranid.
+         * Ini penting supaya show_pkl_menu bisa dihitung berdasarkan
+         * apakah wali kelas punya kelas XII atau tidak.
+         */
+        $data = common_service::get_sidebar_data('dashboard', $userid, $tahunajaranid);
+
         $kelasdata = [];
         $totalclasses = 0;
         $totalstudents = 0;
 
-        $groups = common_service::get_group_walikelas($userid);
+        $groups = common_service::get_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
 
         foreach ($groups as $group) {
             $siswas = common_service::get_siswa_group((int)$group->id, $userid);
 
             $rows = [];
+
             foreach ($siswas as $siswa) {
                 $courses = [];
 
@@ -35,7 +45,6 @@ class dashboard_service {
 
                 if (!empty($usercourses)) {
                     foreach ($usercourses as $course) {
-                        // Opsional: skip site course.
                         if ((int)$course->id === SITEID) {
                             continue;
                         }
@@ -56,6 +65,7 @@ class dashboard_service {
             }
 
             $jumlahsiswa = count($siswas);
+
             $totalstudents += $jumlahsiswa;
             $totalclasses++;
 
@@ -67,8 +77,52 @@ class dashboard_service {
             ];
         }
 
+        /*
+         * show_pkl_menu sudah dikirim dari common_service::get_sidebar_data().
+         * Kalau nilainya true, berarti wali kelas punya kelas XII.
+         * Kalau false, berarti PKL tidak boleh muncul di sidebar maupun card dashboard.
+         */
+        $showpkl = !empty($data['show_pkl_menu']);
+
+        $cards = [
+            [
+                'title' => 'Monitoring Kelas',
+                'desc' => 'Lihat data siswa dan pemantauan kelas yang Anda ampu.',
+                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php'))->out(false),
+                'icon' => '📋',
+            ],
+            [
+                'title' => 'Ekstrakurikuler Siswa',
+                'desc' => 'Kelola data ekstrakurikuler siswa per kelas.',
+                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/ekskul/ekskul.php'))->out(false),
+                'icon' => '🏅',
+            ],
+        ];
+
+        if ($showpkl) {
+            $cards[] = [
+                'title' => 'PKL Siswa',
+                'desc' => 'Lihat dan kelola data PKL siswa beserta mitra DU/DI.',
+                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/pkl/pkl.php'))->out(false),
+                'icon' => '🏢',
+            ];
+        }
+
+        $cards[] = [
+            'title' => 'Raport',
+            'desc' => 'Akses halaman raport siswa.',
+            'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/rapor/index.php'))->out(false),
+            'icon' => '📝',
+        ];
+
         $data['welcometitle'] = 'Selamat Datang di Dashboard Wali Kelas';
-        $data['welcomesubtitle'] = 'Kelola monitoring kelas, ekstrakurikuler, PKL, dan raport siswa dari satu halaman.';
+
+        if ($showpkl) {
+            $data['welcomesubtitle'] = 'Kelola monitoring kelas, ekstrakurikuler, PKL, dan raport siswa dari satu halaman.';
+        } else {
+            $data['welcomesubtitle'] = 'Kelola monitoring kelas, ekstrakurikuler, dan raport siswa dari satu halaman.';
+        }
+
         $data['welcomedesc'] = 'Dashboard ini membantu wali kelas memantau data peserta didik, membuka menu utama dengan cepat, dan melihat ringkasan kelas yang diampu.';
 
         $data['summarycards'] = [
@@ -84,40 +138,26 @@ class dashboard_service {
             ],
             [
                 'label' => 'Menu Aktif',
-                'value' => 4,
+                'value' => count($cards),
                 'icon' => '🧩',
             ],
         ];
 
-        $data['cards'] = [
-            [
-                'title' => 'Monitoring Kelas',
-                'desc' => 'Lihat data siswa dan pemantauan kelas yang Anda ampu.',
-                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php'))->out(false),
-                'icon' => '📋',
-            ],
-            [
-                'title' => 'Ekstrakurikuler Siswa',
-                'desc' => 'Kelola data ekstrakurikuler siswa per kelas.',
-                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/ekskul/ekskul.php'))->out(false),
-                'icon' => '🏅',
-            ],
-            [
-                'title' => 'PKL Siswa',
-                'desc' => 'Lihat dan kelola data PKL siswa beserta mitra DU/DI.',
-                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/pkl/pkl.php'))->out(false),
-                'icon' => '🏢',
-            ],
-            [
-                'title' => 'Raport',
-                'desc' => 'Akses halaman raport siswa.',
-                'url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/rapor/index.php'))->out(false),
-                'icon' => '📝',
-            ],
-        ];
-
+        $data['cards'] = $cards;
         $data['kelas'] = $kelasdata;
         $data['has_kelas'] = !empty($kelasdata);
+
+        $data['selectedsemester'] = $semester;
+        $data['selectedtahunajaranid'] = $tahunajaranid;
+        $data['selected_tahunajaranid'] = $tahunajaranid;
+
+        $data += period_filter_service::build_filter_data();
+
+        $filterdata = period_filter_service::get_filter_ui_data(
+            '/local/akademikmonitor/pages/walikelas/dashboard.php'
+        );
+
+        $data['periodfilter'] = $filterdata['periodfilter'] ?? [];
 
         return $data;
     }

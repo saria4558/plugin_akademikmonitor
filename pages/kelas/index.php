@@ -33,6 +33,7 @@ function local_akademikmonitor_kelas_admin_urls(string $active): array {
         'is_notif' => $active === 'notif',
         'is_ekskul' => $active === 'ekskul',
         'is_mitra' => $active === 'mitra',
+
         'dashboard_url' => (new moodle_url('/local/akademikmonitor/pages/index.php'))->out(false),
         'tahun_ajaran_url' => (new moodle_url('/local/akademikmonitor/pages/tahun_ajaran/index.php'))->out(false),
         'kurikulum_url' => (new moodle_url('/local/akademikmonitor/pages/kurikulum/index.php'))->out(false),
@@ -51,12 +52,15 @@ function local_akademikmonitor_tahun_label($tahun): string {
     if (!$tahun) {
         return '-';
     }
+
     if (property_exists($tahun, 'tahun_ajaran') && trim((string)$tahun->tahun_ajaran) !== '') {
         return (string)$tahun->tahun_ajaran;
     }
+
     if (property_exists($tahun, 'nama') && trim((string)$tahun->nama) !== '') {
         return (string)$tahun->nama;
     }
+
     return '-';
 }
 
@@ -64,18 +68,52 @@ function local_akademikmonitor_kelas_next_label(string $tingkat): array {
     $tingkat = strtoupper(trim($tingkat));
 
     if ($tingkat === 'X') {
-        return ['label' => 'Naik ke XI', 'is_lulus' => false];
+        return [
+            'label' => 'Naik ke XI',
+            'is_lulus' => false,
+        ];
     }
 
     if ($tingkat === 'XI') {
-        return ['label' => 'Naik ke XII', 'is_lulus' => false];
+        return [
+            'label' => 'Naik ke XII',
+            'is_lulus' => false,
+        ];
     }
 
-    return ['label' => 'Luluskan', 'is_lulus' => true];
+    if ($tingkat === 'XII') {
+        return [
+            'label' => 'Luluskan',
+            'is_lulus' => true,
+        ];
+    }
+
+    return [
+        'label' => 'Naik Kelas',
+        'is_lulus' => false,
+    ];
+}
+
+function local_akademikmonitor_get_lulus_ids(): array {
+    $raw = get_config('local_akademikmonitor', 'kelas_lulus_ids');
+
+    if (empty($raw)) {
+        return [];
+    }
+
+    $decoded = json_decode((string)$raw, true);
+
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    return array_values(array_unique(array_filter(array_map('intval', $decoded))));
 }
 
 $tahunajaran = $DB->get_records('tahun_ajaran', null, 'id DESC');
+
 $tahunoptions = [];
+
 foreach ($tahunajaran as $ta) {
     $tahunoptions[] = [
         'id' => (int)$ta->id,
@@ -84,11 +122,10 @@ foreach ($tahunajaran as $ta) {
     ];
 }
 
-$tahunaktifrecords = $DB->get_records('tahun_ajaran', null, 'id DESC', '*', 0, 1);
-$tahunaktif = $tahunaktifrecords ? reset($tahunaktifrecords) : null;
-$tahunaktifid = $tahunaktif ? (int)$tahunaktif->id : 0;
+$lulusids = local_akademikmonitor_get_lulus_ids();
 
 $params = [];
+
 $sql = "SELECT k.id,
                k.nama,
                k.tingkat,
@@ -116,11 +153,19 @@ $kelasrecords = $DB->get_records_sql($sql, $params);
 
 $items = [];
 $no = 1;
+
 foreach ($kelasrecords as $k) {
     $pesertacount = $DB->count_records('peserta_kelas', ['id_kelas' => $k->id]);
-    $next = local_akademikmonitor_kelas_next_label((string)$k->tingkat);
-    $isaktif = $tahunaktifid > 0 && (int)$k->id_tahun_ajaran === $tahunaktifid;
-    $islulusstatus = strtoupper((string)$k->tingkat) === 'XII' && !$isaktif;
+
+    $tingkat = strtoupper(trim((string)($k->tingkat ?? '')));
+    $next = local_akademikmonitor_kelas_next_label($tingkat);
+
+    /*
+     * Status lulus tidak memakai kolom kelas.status, karena tabel kelas kamu
+     * tidak punya kolom itu. Status lulus dibaca dari plugin config
+     * kelas_lulus_ids yang diisi saat tombol Luluskan diklik.
+     */
+    $islulusstatus = in_array((int)$k->id, $lulusids, true);
 
     $items[] = [
         'no' => $no++,
@@ -132,16 +177,38 @@ foreach ($kelasrecords as $k) {
         'tahun_ajaran' => isset($k->tahun_ajaran) ? format_string($k->tahun_ajaran) : '-',
         'wali_nama' => trim((string)($k->firstname ?? '') . ' ' . (string)($k->lastname ?? '')) ?: '-',
         'jumlah_peserta' => $pesertacount,
-        'is_aktif' => $isaktif,
-        'is_lulus' => $next['is_lulus'],
+
+        'is_lulus' => !empty($next['is_lulus']),
         'is_lulus_status' => $islulusstatus,
-        'peserta_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/peserta.php', ['kelasid' => $k->id]))->out(false),
-        'coursemoodle_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/coursemoodle.php', ['id' => $k->id]))->out(false),
-        'edit_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/form.php', ['id' => $k->id]))->out(false),
-        'delete_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/delete.php', ['id' => $k->id, 'sesskey' => sesskey()]))->out(false),
-        'naik_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/naikkan.php', ['id' => $k->id, 'sesskey' => sesskey()]))->out(false),
+        'show_naik_action' => !$islulusstatus,
+
+        'peserta_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/peserta.php', [
+            'kelasid' => $k->id,
+        ]))->out(false),
+
+        'coursemoodle_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/coursemoodle.php', [
+            'id' => $k->id,
+        ]))->out(false),
+
+        'edit_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/form.php', [
+            'id' => $k->id,
+        ]))->out(false),
+
+        'delete_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/delete.php', [
+            'id' => $k->id,
+            'sesskey' => sesskey(),
+        ]))->out(false),
+
+        'naik_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/naikkan.php', [
+            'id' => $k->id,
+            'sesskey' => sesskey(),
+        ]))->out(false),
+
         'naik_label' => $next['label'],
-        'histori_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/histori.php', ['id' => $k->id]))->out(false),
+
+        'histori_url' => (new moodle_url('/local/akademikmonitor/pages/kelas/histori.php', [
+            'id' => $k->id,
+        ]))->out(false),
     ];
 }
 

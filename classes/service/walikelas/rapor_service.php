@@ -25,125 +25,169 @@ class rapor_service {
         return self::get_legacy_courses_by_group($group, $semester);
     }
 
-    private static function get_generated_courses_by_kelas(int $kelasid, int $semester = 0): array {
-        global $DB;
+private static function get_generated_courses_by_kelas(int $kelasid, int $semester = 0): array {
+    global $DB;
 
-        $pattern = 'AM-K' . $kelasid . '-KM%-S%';
+    if ($kelasid <= 0) {
+        return [];
+    }
+
+    $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+
+    $conditions = [];
+    $params = [];
+
+    /*
+     * Format lama:
+     * AM-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     * Contoh: AM-K6-KM83-S1
+     */
+    $oldpattern = 'AM-K' . $kelasid . '-KM%-S%';
+
+    if (in_array($semester, [1, 2], true)) {
+        $oldpattern = 'AM-K' . $kelasid . '-KM%-S' . $semester;
+    }
+
+    $conditions[] = $DB->sql_like('idnumber', ':oldpattern', false);
+    $params['oldpattern'] = $oldpattern;
+
+    /*
+     * Format baru:
+     * AM-TA{id_tahun_ajaran}-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     * Contoh: AM-TA2-K6-KM83-S1
+     */
+    if ($tahunajaranid > 0) {
+        $newpattern = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S%';
 
         if (in_array($semester, [1, 2], true)) {
-            $pattern = 'AM-K' . $kelasid . '-KM%-S' . $semester;
+            $newpattern = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S' . $semester;
         }
+    } else {
+        $newpattern = 'AM-TA%-K' . $kelasid . '-KM%-S%';
 
-        $courses = $DB->get_records_select(
-            'course',
-            $DB->sql_like('idnumber', ':idnumber', false),
-            ['idnumber' => $pattern],
-            'fullname ASC, id ASC',
-            'id, fullname, shortname, idnumber'
-        );
-
-        if (!$courses) {
-            return [];
+        if (in_array($semester, [1, 2], true)) {
+            $newpattern = 'AM-TA%-K' . $kelasid . '-KM%-S' . $semester;
         }
-
-        $courseids = array_map('intval', array_keys($courses));
-
-        [$courseinsql, $courseparams] = $DB->get_in_or_equal($courseids, SQL_PARAMS_NAMED, 'courseid');
-
-        $coursemapels = $DB->get_records_select(
-            'course_mapel',
-            "id_course {$courseinsql}",
-            $courseparams,
-            '',
-            'id_course, id_kurikulum_mapel'
-        );
-
-        $kmidbycourse = [];
-        $kmids = [];
-
-        foreach ($coursemapels as $cm) {
-            $courseid = (int)($cm->id_course ?? 0);
-            $kmid = (int)($cm->id_kurikulum_mapel ?? 0);
-
-            if ($courseid <= 0 || $kmid <= 0) {
-                continue;
-            }
-
-            $kmidbycourse[$courseid] = $kmid;
-            $kmids[$kmid] = $kmid;
-        }
-
-        $kurikulummapels = [];
-        $matapelajarans = [];
-
-        if ($kmids) {
-            $kurikulummapels = $DB->get_records_list(
-                'kurikulum_mapel',
-                'id',
-                array_values($kmids),
-                '',
-                'id, id_mapel, kktp, tingkat_kelas'
-            );
-
-            $mapelids = [];
-
-            foreach ($kurikulummapels as $km) {
-                $mapelid = (int)($km->id_mapel ?? 0);
-
-                if ($mapelid > 0) {
-                    $mapelids[$mapelid] = $mapelid;
-                }
-            }
-
-            if ($mapelids) {
-                $matapelajarans = $DB->get_records_list(
-                    'mata_pelajaran',
-                    'id',
-                    array_values($mapelids),
-                    '',
-                    'id, nama_mapel'
-                );
-            }
-        }
-
-        $out = [];
-
-        foreach ($courses as $course) {
-            $courseid = (int)$course->id;
-            $kmid = $kmidbycourse[$courseid] ?? 0;
-            $km = ($kmid > 0 && isset($kurikulummapels[$kmid])) ? $kurikulummapels[$kmid] : null;
-
-            $mapelname = '';
-            $kktp = 0;
-
-            if ($km) {
-                $mapelid = (int)($km->id_mapel ?? 0);
-                $kktp = (int)($km->kktp ?? 0);
-
-                if ($mapelid > 0 && isset($matapelajarans[$mapelid])) {
-                    $mapelname = (string)$matapelajarans[$mapelid]->nama_mapel;
-                }
-            }
-
-            if ($mapelname === '') {
-                $mapelname = (string)$course->fullname;
-            }
-
-            $out[$courseid] = (object)[
-                'id' => $courseid,
-                'fullname' => (string)$course->fullname,
-                'shortname' => (string)($course->shortname ?? ''),
-                'nama_mapel' => self::clean_mapel_name($mapelname),
-                'kktp' => $kktp,
-            ];
-        }
-
-        uasort($out, static function($a, $b) {
-            return strcasecmp((string)$a->nama_mapel, (string)$b->nama_mapel);
-        });
-
-        return $out;
     }
+
+    $conditions[] = $DB->sql_like('idnumber', ':newpattern', false);
+    $params['newpattern'] = $newpattern;
+
+    $courses = $DB->get_records_select(
+        'course',
+        '(' . implode(' OR ', $conditions) . ')',
+        $params,
+        'fullname ASC, id ASC',
+        'id, fullname, shortname, idnumber'
+    );
+
+    if (!$courses) {
+        return [];
+    }
+
+    $courseids = array_map('intval', array_keys($courses));
+
+    [$courseinsql, $courseparams] = $DB->get_in_or_equal(
+        $courseids,
+        SQL_PARAMS_NAMED,
+        'courseid'
+    );
+
+    $coursemapels = $DB->get_records_select(
+        'course_mapel',
+        "id_course {$courseinsql}",
+        $courseparams,
+        '',
+        'id_course, id_kurikulum_mapel'
+    );
+
+    $kmidbycourse = [];
+    $kmids = [];
+
+    foreach ($coursemapels as $cm) {
+        $courseid = (int)($cm->id_course ?? 0);
+        $kmid = (int)($cm->id_kurikulum_mapel ?? 0);
+
+        if ($courseid <= 0 || $kmid <= 0) {
+            continue;
+        }
+
+        $kmidbycourse[$courseid] = $kmid;
+        $kmids[$kmid] = $kmid;
+    }
+
+    $kurikulummapels = [];
+    $matapelajarans = [];
+
+    if ($kmids) {
+        $kurikulummapels = $DB->get_records_list(
+            'kurikulum_mapel',
+            'id',
+            array_values($kmids),
+            '',
+            'id, id_mapel, kktp, tingkat_kelas'
+        );
+
+        $mapelids = [];
+
+        foreach ($kurikulummapels as $km) {
+            $mapelid = (int)($km->id_mapel ?? 0);
+
+            if ($mapelid > 0) {
+                $mapelids[$mapelid] = $mapelid;
+            }
+        }
+
+        if ($mapelids) {
+            $matapelajarans = $DB->get_records_list(
+                'mata_pelajaran',
+                'id',
+                array_values($mapelids),
+                '',
+                'id, nama_mapel'
+            );
+        }
+    }
+
+    $out = [];
+
+    foreach ($courses as $course) {
+        $courseid = (int)$course->id;
+        $kmid = $kmidbycourse[$courseid] ?? 0;
+        $km = ($kmid > 0 && isset($kurikulummapels[$kmid])) ? $kurikulummapels[$kmid] : null;
+
+        $mapelname = '';
+        $kktp = 0;
+
+        if ($km) {
+            $mapelid = (int)($km->id_mapel ?? 0);
+            $kktp = (int)($km->kktp ?? 0);
+
+            if ($mapelid > 0 && isset($matapelajarans[$mapelid])) {
+                $mapelname = (string)$matapelajarans[$mapelid]->nama_mapel;
+            }
+        }
+
+        if ($mapelname === '') {
+            $mapelname = (string)$course->fullname;
+        }
+
+        $out[$courseid] = (object)[
+            'id' => $courseid,
+            'fullname' => (string)$course->fullname,
+            'shortname' => (string)($course->shortname ?? ''),
+            'idnumber' => (string)($course->idnumber ?? ''),
+            'nama_mapel' => self::clean_mapel_name($mapelname),
+            'kktp' => $kktp,
+        ];
+    }
+
+    uasort($out, static function($a, $b) {
+        return strcasecmp((string)$a->nama_mapel, (string)$b->nama_mapel);
+    });
+
+    return $out;
+}
 
     private static function get_legacy_courses_by_group(\stdClass $group, int $semester = 0): array {
         global $DB;
@@ -337,81 +381,100 @@ class rapor_service {
         ];
     }
 
-    public static function get_page_data(int $userid, int $semester = 1, int $tahunajaranid = 0): array {
-        $data = common_service::get_sidebar_data('rapor');
+public static function get_page_data(int $userid, int $semester = 1, int $tahunajaranid = 0): array {
+    if ($semester <= 0) {
+        $semester = period_filter_service::get_selected_semester();
+    }
 
-        $group = common_service::get_first_group_walikelas($userid);
+    if ($tahunajaranid <= 0) {
+        $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+    }
 
-        if (!$group) {
-            $data['nokelas'] = true;
-            return $data;
-        }
+    $data = common_service::get_sidebar_data('rapor', $userid, $tahunajaranid);
 
-        $rows = array_values(self::get_raport_kelas((int)$group->id, $userid, $semester));
+    $group = common_service::get_first_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
 
-        foreach ($rows as $index => $row) {
-            $studentid = (int)($row['userid'] ?? 0);
+    if (!$group) {
+        $data['nokelas'] = true;
 
-            $rows[$index]['detail_url'] = (new \moodle_url(
-                '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
-                period_filter_service::append_filter_params([
-                    'userid' => $studentid,
-                    'kelasid' => (int)$group->id,
-                ])
-            ))->out(false);
-        }
-
-        $data['kelas'] = (string)$group->name;
-        $data['rows'] = $rows;
         $data += period_filter_service::build_filter_data();
-        $data += period_filter_service::get_filter_ui_data('/local/akademikmonitor/pages/walikelas/rapor/index.php');
 
         return $data;
     }
 
-    public static function get_primary_groupid_by_student(int $userid, int $waliuserid = 0): int {
-        global $DB, $USER;
+    $rows = array_values(self::get_raport_kelas((int)$group->id, $userid, $semester));
 
-        if ($userid <= 0) {
-            return 0;
-        }
+    foreach ($rows as $index => $row) {
+        $studentid = (int)($row['userid'] ?? 0);
 
-        if ($waliuserid <= 0 && !empty($USER->id)) {
-            $waliuserid = (int)$USER->id;
-        }
-
-        $params = ['userid' => $userid];
-        $walisql = '';
-
-        if ($waliuserid > 0) {
-            $params['waliuserid'] = $waliuserid;
-            $walisql = " AND EXISTS (
-                            SELECT 1
-                              FROM {groups_members} gmwali
-                             WHERE gmwali.groupid = g.id
-                               AND gmwali.userid = :waliuserid
-                         )";
-        }
-
-        $sql = "SELECT g.id, g.courseid, c.idnumber
-                  FROM {groups_members} gm
-                  JOIN {groups} g ON g.id = gm.groupid
-             LEFT JOIN {course} c ON c.id = g.courseid
-                 WHERE gm.userid = :userid
-                       {$walisql}
-              ORDER BY CASE WHEN c.idnumber LIKE 'AM-K%-KM%-S%' THEN 0 ELSE 1 END,
-                       g.id ASC";
-
-        $records = $DB->get_records_sql($sql, $params, 0, 1);
-
-        if (!$records) {
-            return 0;
-        }
-
-        $first = reset($records);
-
-        return (int)($first->id ?? 0);
+        $rows[$index]['detail_url'] = (new \moodle_url(
+            '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
+            period_filter_service::append_filter_params([
+                'userid' => $studentid,
+                'kelasid' => (int)$group->id,
+            ])
+        ))->out(false);
     }
+
+    $data['kelas'] = (string)$group->name;
+    $data['rows'] = $rows;
+    $data['selectedsemester'] = $semester;
+    $data['selectedtahunajaranid'] = $tahunajaranid;
+    $data['selected_tahunajaranid'] = $tahunajaranid;
+
+    $data += period_filter_service::build_filter_data();
+    
+
+    return $data;
+}
+
+public static function get_primary_groupid_by_student(int $userid, int $waliuserid = 0): int {
+    global $DB, $USER;
+
+    if ($userid <= 0) {
+        return 0;
+    }
+
+    if ($waliuserid <= 0 && !empty($USER->id)) {
+        $waliuserid = (int)$USER->id;
+    }
+
+    $params = ['userid' => $userid];
+    $walisql = '';
+
+    if ($waliuserid > 0) {
+        $params['waliuserid'] = $waliuserid;
+        $walisql = " AND EXISTS (
+                        SELECT 1
+                          FROM {groups_members} gmwali
+                         WHERE gmwali.groupid = g.id
+                           AND gmwali.userid = :waliuserid
+                     )";
+    }
+
+    $sql = "SELECT g.id, g.courseid, c.idnumber
+              FROM {groups_members} gm
+              JOIN {groups} g ON g.id = gm.groupid
+         LEFT JOIN {course} c ON c.id = g.courseid
+             WHERE gm.userid = :userid
+                   {$walisql}
+          ORDER BY CASE
+                       WHEN c.idnumber LIKE 'AM-TA%-K%-KM%-S%' THEN 0
+                       WHEN c.idnumber LIKE 'AM-K%-KM%-S%' THEN 1
+                       ELSE 2
+                   END,
+                   g.id ASC";
+
+    $records = $DB->get_records_sql($sql, $params, 0, 1);
+
+    if (!$records) {
+        return 0;
+    }
+
+    $first = reset($records);
+
+    return (int)($first->id ?? 0);
+}
 
     public static function get_student_course(int $userid): ?\stdClass {
         global $DB;
@@ -1126,52 +1189,412 @@ class rapor_service {
         ]);
     }
 
-    public static function get_ketidakhadiran(int $userid, int $kelasid, int $semester) {
-        global $DB;
+private static function get_manual_ketidakhadiran(int $userid, int $kelasid, int $semester) {
+    global $DB;
 
-        return $DB->get_record('rapor_ketidakhadiran', [
-            'id_siswa' => $userid,
-            'id_kelas' => $kelasid,
-            'semester' => $semester,
-        ]);
+    /*
+     * Fungsi ini khusus membaca data manual wali kelas dari tabel plugin.
+     *
+     * Kenapa dipisah?
+     * Karena get_ketidakhadiran() nanti bisa mengambil data otomatis dari
+     * plugin Attendance Moodle. Saat wali kelas klik Simpan, yang boleh
+     * di-update hanya data manual di tabel rapor_ketidakhadiran.
+     */
+    $manual = $DB->get_record('rapor_ketidakhadiran', [
+        'id_siswa' => $userid,
+        'id_kelas' => $kelasid,
+        'semester' => $semester,
+    ], '*', IGNORE_MISSING);
+
+    if ($manual) {
+        $manual->source = 'manual';
+        $manual->isauto = false;
+        return $manual;
     }
 
-    public static function save_ketidakhadiran(
-        int $userid,
-        int $kelasid,
-        int $semester,
-        int $sakit,
-        int $izin,
-        int $alfa,
-        int $waliid
-    ): void {
-        global $DB;
+    return null;
+}
 
-        $existing = self::get_ketidakhadiran($userid, $kelasid, $semester);
+private static function get_ketidakhadiran_from_attendance_daily(
+    int $userid,
+    int $kelasid,
+    int $semester,
+    int $tahunajaranid = 0
+): ?\stdClass {
+    global $DB;
 
-        if ($existing) {
-            $existing->sakit = $sakit;
-            $existing->izin = $izin;
-            $existing->alfa = $alfa;
-            $existing->timemodified = time();
-            $DB->update_record('rapor_ketidakhadiran', $existing);
-            return;
+    if ($userid <= 0 || $kelasid <= 0 || !in_array($semester, [1, 2], true)) {
+        return null;
+    }
+
+    /*
+     * Di halaman detail rapor, $kelasid biasanya adalah ID group Moodle.
+     *
+     * Sedangkan course hasil generate Akademik Monitoring memakai ID kelas
+     * custom dari tabel {kelas} di idnumber course.
+     *
+     * Contoh:
+     * - URL detail rapor membawa kelasid=15
+     * - 15 itu ID group Moodle
+     * - course idnumber berbentuk AM-TA2-K6-KM83-S1
+     * - berarti ID kelas custom yang harus dicari adalah 6
+     *
+     * Karena itu groupid dikonversi dulu menjadi custom kelas id.
+     */
+    $customkelasid = self::get_custom_kelasid_from_generated_groupid($kelasid);
+
+    if ($customkelasid <= 0) {
+        $customkelasid = $kelasid;
+    }
+
+    /*
+     * Cek apakah plugin Attendance sudah terpasang.
+     *
+     * Kalau tabel-tabel ini tidak ada, berarti fitur otomatis tidak bisa
+     * dipakai dan sistem akan fallback ke manual/kosong.
+     */
+    $dbman = $DB->get_manager();
+
+foreach (['attendance', 'attendance_sessions', 'attendance_log', 'attendance_statuses'] as $table) {
+    if (!$dbman->table_exists(new \xmldb_table($table))) {
+        return null;
+    }
+}
+
+    /*
+     * Ambil semua course hasil generate sesuai kelas custom, semester,
+     * dan tahun ajaran.
+     *
+     * Ini penting supaya presensi dari course tahun ajaran/semester lain
+     * tidak ikut terhitung.
+     */
+    $courses = self::get_generated_attendance_courses_by_kelas_period(
+        $customkelasid,
+        $semester,
+        $tahunajaranid
+    );
+
+    if (!$courses) {
+        return null;
+    }
+
+    $courseids = array_map('intval', array_keys($courses));
+
+    if (!$courseids) {
+        return null;
+    }
+
+    [$courseinsql, $courseparams] = $DB->get_in_or_equal(
+        $courseids,
+        SQL_PARAMS_NAMED,
+        'courseid'
+    );
+
+    /*
+     * Ambil log presensi siswa dari plugin Attendance Moodle.
+     *
+     * Relasi tabel Attendance:
+     * - attendance.course = course.id
+     * - attendance_sessions.attendanceid = attendance.id
+     * - attendance_log.sessionid = attendance_sessions.id
+     * - attendance_log.statusid = attendance_statuses.id
+     */
+    $sql = "SELECT al.id,
+                   ats.sessdate,
+                   ast.acronym,
+                   ast.description
+              FROM {attendance_log} al
+              JOIN {attendance_sessions} ats ON ats.id = al.sessionid
+              JOIN {attendance} a ON a.id = ats.attendanceid
+              JOIN {attendance_statuses} ast ON ast.id = al.statusid
+             WHERE al.studentid = :userid
+               AND a.course {$courseinsql}
+          ORDER BY ats.sessdate ASC, al.id ASC";
+
+    $params = array_merge($courseparams, [
+        'userid' => $userid,
+    ]);
+
+    $logs = $DB->get_records_sql($sql, $params);
+
+    if (!$logs) {
+        return null;
+    }
+
+    /*
+     * Hitung per tanggal, bukan per course.
+     *
+     * Contoh:
+     * 2026-05-05 Matematika = Alfa
+     * 2026-05-05 Bahasa Indonesia = Alfa
+     *
+     * Di rapor tetap dihitung:
+     * Alfa = 1
+     *
+     * Bukan:
+     * Alfa = 2
+     */
+    $perday = [];
+
+    foreach ($logs as $log) {
+        $datekey = date('Y-m-d', (int)$log->sessdate);
+
+        $status = self::normalize_attendance_status_for_rapor(
+            (string)($log->acronym ?? ''),
+            (string)($log->description ?? '')
+        );
+
+        if (!isset($perday[$datekey])) {
+            $perday[$datekey] = $status;
+            continue;
         }
 
-        $now = time();
-
-        $DB->insert_record('rapor_ketidakhadiran', (object)[
-            'id_siswa' => $userid,
-            'id_kelas' => $kelasid,
-            'semester' => $semester,
-            'sakit' => $sakit,
-            'izin' => $izin,
-            'alfa' => $alfa,
-            'id_penginput' => $waliid,
-            'timecreated' => $now,
-            'timemodified' => $now,
-        ]);
+        /*
+         * Kalau dalam satu hari ada beberapa status, ambil status terkuat.
+         *
+         * Prioritas:
+         * Alfa > Izin > Sakit > Hadir
+         */
+        $perday[$datekey] = self::pick_stronger_absence_status(
+            $perday[$datekey],
+            $status
+        );
     }
+
+    $result = new \stdClass();
+    $result->sakit = 0;
+    $result->izin = 0;
+    $result->alfa = 0;
+    $result->source = 'attendance_daily';
+    $result->isauto = true;
+
+    foreach ($perday as $status) {
+        if ($status === 'sakit') {
+            $result->sakit++;
+        } else if ($status === 'izin') {
+            $result->izin++;
+        } else if ($status === 'alfa') {
+            $result->alfa++;
+        }
+    }
+
+    return $result;
+}
+
+private static function normalize_attendance_status_for_rapor(string $acronym, string $description): string {
+    $text = \core_text::strtolower(trim($acronym . ' ' . $description));
+
+    /*
+     * Mapping status Attendance Moodle ke format rapor.
+     *
+     * P / Present / Hadir       => hadir
+     * L / Late / Terlambat      => hadir
+     * A / Absent / Alfa         => alfa
+     * E / Excused / Izin        => izin
+     * I / Izin                  => izin
+     * S / Sick / Sakit          => sakit
+     */
+    if (preg_match('/\b(a|alfa|alpha|absent|tidak hadir|tanpa keterangan)\b/u', $text)) {
+        return 'alfa';
+    }
+
+    if (preg_match('/\b(i|izin|ijin|excused|permission)\b/u', $text)) {
+        return 'izin';
+    }
+
+    if (preg_match('/\b(s|sakit|sick)\b/u', $text)) {
+        return 'sakit';
+    }
+
+    return 'hadir';
+}
+
+private static function pick_stronger_absence_status(string $current, string $new): string {
+    /*
+     * Kalau dalam satu hari ada beberapa presensi dari beberapa mapel,
+     * ambil status yang paling kuat.
+     *
+     * Contoh:
+     * Hadir + Alfa => Alfa
+     * Hadir + Izin => Izin
+     * Sakit + Alfa => Alfa
+     */
+    $priority = [
+        'hadir' => 0,
+        'sakit' => 1,
+        'izin' => 2,
+        'alfa' => 3,
+    ];
+
+    $currentvalue = $priority[$current] ?? 0;
+    $newvalue = $priority[$new] ?? 0;
+
+    return ($newvalue > $currentvalue) ? $new : $current;
+}
+
+private static function get_generated_attendance_courses_by_kelas_period(
+    int $kelasid,
+    int $semester,
+    int $tahunajaranid = 0
+): array {
+    global $DB;
+
+    if ($kelasid <= 0 || !in_array($semester, [1, 2], true)) {
+        return [];
+    }
+
+    $conditions = [];
+    $params = [];
+
+    /*
+     * Format baru dengan KM:
+     * AM-TA{id_tahunajaran}-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     *
+     * Contoh:
+     * AM-TA2-K6-KM83-S1
+     */
+    if ($tahunajaranid > 0) {
+        $conditions[] = $DB->sql_like('idnumber', ':newpatternkm', false, false);
+        $params['newpatternkm'] = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S' . $semester;
+    } else {
+        $conditions[] = $DB->sql_like('idnumber', ':newpatternkm', false, false);
+        $params['newpatternkm'] = 'AM-TA%-K' . $kelasid . '-KM%-S' . $semester;
+    }
+
+    /*
+     * Format lama dengan KM:
+     * AM-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     *
+     * Contoh:
+     * AM-K6-KM83-S1
+     */
+    $conditions[] = $DB->sql_like('idnumber', ':oldpatternkm', false, false);
+    $params['oldpatternkm'] = 'AM-K' . $kelasid . '-KM%-S' . $semester;
+
+    /*
+     * Jaga-jaga kalau nanti kamu punya course absensi khusus tanpa KM.
+     *
+     * Format baru tanpa KM:
+     * AM-TA{id_tahunajaran}-K{id_kelas}-S{semester}
+     *
+     * Format lama tanpa KM:
+     * AM-K{id_kelas}-S{semester}
+     */
+    if ($tahunajaranid > 0) {
+        $conditions[] = $DB->sql_like('idnumber', ':newpatternnokm', false, false);
+        $params['newpatternnokm'] = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-S' . $semester;
+    } else {
+        $conditions[] = $DB->sql_like('idnumber', ':newpatternnokm', false, false);
+        $params['newpatternnokm'] = 'AM-TA%-K' . $kelasid . '-S' . $semester;
+    }
+
+    $conditions[] = $DB->sql_like('idnumber', ':oldpatternnokm', false, false);
+    $params['oldpatternnokm'] = 'AM-K' . $kelasid . '-S' . $semester;
+
+    return $DB->get_records_select(
+        'course',
+        '(' . implode(' OR ', $conditions) . ')',
+        $params,
+        'fullname ASC, id ASC',
+        'id, fullname, shortname, idnumber'
+    );
+}
+
+public static function get_ketidakhadiran(
+    int $userid,
+    int $kelasid,
+    int $semester,
+    int $tahunajaranid = 0
+) {
+    /*
+     * Prioritas 1:
+     * Data manual wali kelas.
+     *
+     * Kalau wali kelas sudah pernah edit dan simpan manual, data manual ini
+     * yang dipakai agar input wali kelas tidak tertimpa data otomatis.
+     */
+    $manual = self::get_manual_ketidakhadiran($userid, $kelasid, $semester);
+
+    if ($manual) {
+        return $manual;
+    }
+
+    /*
+     * Prioritas 2:
+     * Data otomatis dari plugin Attendance Moodle.
+     *
+     * Ini hanya dipakai kalau belum ada data manual.
+     */
+    $auto = self::get_ketidakhadiran_from_attendance_daily(
+        $userid,
+        $kelasid,
+        $semester,
+        $tahunajaranid
+    );
+
+    if ($auto !== null) {
+        return $auto;
+    }
+
+    /*
+     * Prioritas 3:
+     * Kosong.
+     */
+    return (object)[
+        'sakit' => 0,
+        'izin' => 0,
+        'alfa' => 0,
+        'source' => 'empty',
+        'isauto' => false,
+    ];
+}
+
+public static function save_ketidakhadiran(
+    int $userid,
+    int $kelasid,
+    int $semester,
+    int $sakit,
+    int $izin,
+    int $alfa,
+    int $waliid
+): void {
+    global $DB;
+
+    /*
+     * Simpan manual hanya mengecek tabel manual.
+     *
+     * Jangan pakai get_ketidakhadiran() di sini, karena function itu bisa
+     * mengembalikan data otomatis dari Attendance Moodle. Kalau data otomatis
+     * dianggap existing record, nanti update_record akan salah karena data
+     * otomatis tidak berasal dari tabel rapor_ketidakhadiran.
+     */
+    $existing = self::get_manual_ketidakhadiran($userid, $kelasid, $semester);
+
+    if ($existing) {
+        $existing->sakit = $sakit;
+        $existing->izin = $izin;
+        $existing->alfa = $alfa;
+        $existing->id_penginput = $waliid;
+        $existing->timemodified = time();
+
+        $DB->update_record('rapor_ketidakhadiran', $existing);
+        return;
+    }
+
+    $now = time();
+
+    $DB->insert_record('rapor_ketidakhadiran', (object)[
+        'id_siswa' => $userid,
+        'id_kelas' => $kelasid,
+        'semester' => $semester,
+        'sakit' => $sakit,
+        'izin' => $izin,
+        'alfa' => $alfa,
+        'id_penginput' => $waliid,
+        'timecreated' => $now,
+        'timemodified' => $now,
+    ]);
+}
 
     public static function format_tanggal_indo(?string $tanggal): string {
         if (empty($tanggal)) {
@@ -1570,7 +1993,8 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
         $kelasid = $groupid;
 
         $ekskul = ekskul_service::get_ekskul_siswa($userid, $kelasid, $semester);
-        $pkl = pkl_service::get_pkl_siswa($userid, $kelasid, $semester);
+        $showpkl = common_service::is_group_kelas_xii($kelasid);
+        $pkl = $showpkl ? pkl_service::get_pkl_siswa($userid, $kelasid, $semester) : [];
 
         foreach ($pkl as $index => $item) {
             $item->no = $index + 1;
@@ -1584,12 +2008,13 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
         $nilaiakademik = self::get_nilai_akademik_detail($userid, $groupid, $semester);
         $catatan = self::get_catatan($userid, $kelasid, $semester);
         $keputusan = self::get_kenaikan_kelas($userid, $kelasid);
-        $ketidakhadiran = self::get_ketidakhadiran($userid, $kelasid, $semester);
+        $ketidakhadiran = self::get_ketidakhadiran($userid, $kelasid, $semester, $tahunajaranid);
 
-        $template = common_service::get_sidebar_data('rapor');
+        $template = common_service::get_sidebar_data('rapor', (int)($USER->id ?? 0), $tahunajaranid);
         $datadiri = self::get_datadiri_array($user, $profile);
         $template += $datadiri + [
             'ekskul' => array_values($ekskul),
+            'show_pkl' => $showpkl,
             'pkl' => array_values($pkl),
             'nilai_akademik' => array_values($nilaiakademik),
             'has_nilai_akademik' => !empty($nilaiakademik),
@@ -1600,6 +2025,9 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             'sakit' => $ketidakhadiran->sakit ?? 0,
             'izin' => $ketidakhadiran->izin ?? 0,
             'alfa' => $ketidakhadiran->alfa ?? 0,
+            'ketidakhadiran_auto' => (($ketidakhadiran->source ?? '') === 'attendance_daily'),
+            'ketidakhadiran_manual' => (($ketidakhadiran->source ?? '') === 'manual'),
+            'ketidakhadiran_empty' => (($ketidakhadiran->source ?? '') === 'empty'),
             'semester' => $semester,
             'semester_label' => period_filter_service::get_semester_label($semester),
             'tahunajaranid' => $tahunajaranid,
@@ -1623,13 +2051,9 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
                 ])
             ))->out(false),
         ];
-
         $template += period_filter_service::build_filter_data();
-        $template += period_filter_service::get_filter_ui_data('/local/akademikmonitor/pages/walikelas/rapor/detail.php', [
-            'userid' => $userid,
-            'kelasid' => $kelasid,
-        ]);
-
+        $template['caneditperiod'] = period_filter_service::can_edit_tahunajaran($tahunajaranid);
+        $template['readonlyperiod'] = !$template['caneditperiod'];
         return [
             'course' => $course,
             'group' => $group,
@@ -1638,31 +2062,54 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
         ];
     }
 
-    private static function get_custom_kelasid_from_generated_groupid(int $groupid): int {
-        global $DB;
+private static function get_custom_kelasid_from_generated_groupid(int $groupid): int {
+    global $DB;
 
-        if ($groupid <= 0) {
-            return 0;
-        }
-
-        $group = $DB->get_record('groups', ['id' => $groupid], 'id, courseid', IGNORE_MISSING);
-
-        if (!$group || empty($group->courseid)) {
-            return 0;
-        }
-
-        $course = $DB->get_record('course', ['id' => (int)$group->courseid], 'id, idnumber', IGNORE_MISSING);
-
-        if (!$course || empty($course->idnumber)) {
-            return 0;
-        }
-
-        if (preg_match('/^AM-K(\d+)-KM(\d+)-S([12])$/', trim((string)$course->idnumber), $matches)) {
-            return (int)$matches[1];
-        }
-
+    if ($groupid <= 0) {
         return 0;
     }
+
+    $group = $DB->get_record(
+        'groups',
+        ['id' => $groupid],
+        'id, courseid',
+        IGNORE_MISSING
+    );
+
+    if (!$group || empty($group->courseid)) {
+        return 0;
+    }
+
+    $course = $DB->get_record(
+        'course',
+        ['id' => (int)$group->courseid],
+        'id, idnumber',
+        IGNORE_MISSING
+    );
+
+    if (!$course || empty($course->idnumber)) {
+        return 0;
+    }
+
+    $idnumber = trim((string)$course->idnumber);
+
+    /*
+     * Mendukung format dengan KM:
+     * - AM-TA2-K6-KM83-S1
+     * - AM-K6-KM83-S1
+     *
+     * Mendukung format tanpa KM:
+     * - AM-TA2-K6-S1
+     * - AM-K6-S1
+     *
+     * Yang diambil adalah angka setelah K, yaitu ID kelas custom.
+     */
+    if (preg_match('/^AM-(?:TA\d+-)?K(\d+)(?:-KM\d+)?-S([12])$/', $idnumber, $matches)) {
+        return (int)$matches[1];
+    }
+
+    return 0;
+}
 
     private static function get_kelas_rapor_identity(int $groupid, int $tahunajaranid = 0): array {
         global $DB;
@@ -1807,6 +2254,8 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             ? (int)$kelasrapor['wali_kelas_id']
             : (int)($USER->id ?? 0);
 
+        $showpkl = common_service::is_group_kelas_xii($kelasid);
+
         return [
             'user' => $user,
             'profile' => $profile,
@@ -1820,9 +2269,10 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             'datadiri' => self::get_datadiri_array($user, $profile),
             'nilai_akademik' => self::get_nilai_akademik_detail($userid, $kelasid, $semester),
             'ringkasan_ranking' => self::get_student_ranking_summary($userid, $kelasid, $walikelasid, $semester),
-            'pkl' => pkl_service::get_pkl_siswa($userid, $kelasid, $semester),
+            'show_pkl' => $showpkl,
+            'pkl' => $showpkl ? pkl_service::get_pkl_siswa($userid, $kelasid, $semester) : [],
             'ekskul' => ekskul_service::get_ekskul_siswa($userid, $kelasid, $semester),
-            'absen' => self::get_ketidakhadiran($userid, $kelasid, $semester),
+            'absen' => self::get_ketidakhadiran($userid, $kelasid, $semester, $tahunajaranid),
             'catatan' => self::get_catatan($userid, $kelasid, $semester),
             'keputusan' => self::get_kenaikan_kelas($userid, $kelasid),
             'walikelas' => self::get_walikelas_signature_data($walikelasid),
@@ -1946,6 +2396,16 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
     public static function get_school_profile_config(): array {
         $config = get_config('local_akademikmonitor');
 
+        $coverlogosrc = self::get_rapor_setting_image_datauri(
+            'rapor_cover_logo',
+            self::get_default_rapor_logo_datauri()
+        );
+
+        $watermarksrc = self::get_rapor_setting_image_datauri(
+            'rapor_watermark',
+            $coverlogosrc
+        );
+
         return [
             'namasekolah' => trim($config->namasekolah ?? '') !== ''
                 ? $config->namasekolah
@@ -1978,6 +2438,81 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             'tahuncoverdefault' => !empty($config->tahuncoverdefault)
                 ? $config->tahuncoverdefault
                 : date('Y'),
+
+            /*
+            * Gambar rapor dari pengaturan admin.
+            *
+            * coverlogosrc:
+            * - dipakai untuk logo di halaman sampul.
+            *
+            * watermarksrc:
+            * - dipakai untuk watermark seluruh halaman.
+            * - jika admin tidak upload watermark, fallback ke logo sampul.
+            */
+            'coverlogosrc' => $coverlogosrc,
+            'watermarksrc' => $watermarksrc,
         ];
+    }
+
+    private static function get_rapor_setting_image_datauri(string $filearea, string $fallback = ''): string {
+        $context = \context_system::instance();
+        $fs = get_file_storage();
+
+        $files = $fs->get_area_files(
+            $context->id,
+            'local_akademikmonitor',
+            $filearea,
+            0,
+            'sortorder DESC, timemodified DESC, id DESC',
+            false
+        );
+
+        if (!$files) {
+            return $fallback;
+        }
+
+        foreach ($files as $file) {
+            if ($file->is_directory()) {
+                continue;
+            }
+
+            $mimetype = (string)$file->get_mimetype();
+
+            if (!preg_match('/^image\/(png|jpeg|jpg)$/i', $mimetype)) {
+                continue;
+            }
+
+            return 'data:' . $mimetype . ';base64,' . base64_encode($file->get_content());
+        }
+
+        return $fallback;
+    }
+
+    private static function get_default_rapor_logo_datauri(): string {
+        global $CFG;
+
+        $candidates = [
+            $CFG->dirroot . '/local/akademikmonitor/pix/logo.jpg',
+            $CFG->dirroot . '/local/akademikmonitor/pix/logo.jpeg',
+            $CFG->dirroot . '/local/akademikmonitor/pix/logo.png',
+        ];
+
+        foreach ($candidates as $path) {
+            if (!file_exists($path)) {
+                continue;
+            }
+
+            $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+            if ($extension === 'png') {
+                $mimetype = 'image/png';
+            } else {
+                $mimetype = 'image/jpeg';
+            }
+
+            return 'data:' . $mimetype . ';base64,' . base64_encode(file_get_contents($path));
+        }
+
+        return '';
     }
 }

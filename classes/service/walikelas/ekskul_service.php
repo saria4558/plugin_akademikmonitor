@@ -1,6 +1,8 @@
 <?php
 namespace local_akademikmonitor\service\walikelas;
 
+use local_akademikmonitor\service\period_filter_service;
+
 defined('MOODLE_INTERNAL') || die();
 
 class ekskul_service {
@@ -30,6 +32,7 @@ class ekskul_service {
         }
 
         $ekskulids = [];
+
         foreach ($rapor as $r) {
             if (!empty($r->id_ekskul)) {
                 $ekskulids[] = (int)$r->id_ekskul;
@@ -40,10 +43,17 @@ class ekskul_service {
         $ekskuls = [];
 
         if ($ekskulids) {
-            $ekskuls = $DB->get_records_list('ekskul', 'id', $ekskulids, '', 'id, nama');
+            $ekskuls = $DB->get_records_list(
+                'ekskul',
+                'id',
+                $ekskulids,
+                '',
+                'id, nama'
+            );
         }
 
         $out = [];
+
         foreach ($rapor as $r) {
             $eid = (int)($r->id_ekskul ?? 0);
 
@@ -85,23 +95,23 @@ class ekskul_service {
         $predikat = strtoupper(trim($predikat));
 
         if ($userid <= 0) {
-            throw new \moodle_exception('User siswa tidak valid');
+            throw new \exception('User siswa tidak valid');
         }
 
         if ($kelasid <= 0) {
-            throw new \moodle_exception('Kelas tidak valid');
+            throw new \exception('Kelas tidak valid');
         }
 
         if ($ekskulid <= 0) {
-            throw new \moodle_exception('Ekskul tidak valid');
+            throw new \exception('Ekskul tidak valid');
         }
 
         if (!in_array($semester, [1, 2], true)) {
-            throw new \moodle_exception('Semester harus 1 atau 2');
+            throw new \exception('Semester harus 1 atau 2');
         }
 
         if (!in_array($predikat, ['A', 'B', 'C', 'D'], true)) {
-            throw new \moodle_exception('Predikat harus A, B, C, atau D');
+            throw new \exception('Predikat harus A, B, C, atau D');
         }
 
         $keterangan = self::get_keterangan_predikat($predikat);
@@ -135,14 +145,27 @@ class ekskul_service {
         ]);
     }
 
-    public static function get_page_data(int $userid, int $semester = 0): array {
+    public static function get_page_data(int $userid, int $semester = 0, int $tahunajaranid = 0): array {
         global $DB;
 
-        $data = common_service::get_sidebar_data('ekskul');
+        if ($semester <= 0) {
+            $semester = period_filter_service::get_selected_semester();
+        }
+
+        if ($tahunajaranid <= 0) {
+            $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+        }
+
+        /*
+         * Sidebar wajib dikirim dengan userid dan tahunajaranid.
+         * Kalau tidak, show_pkl_menu bisa salah di halaman ekstrakurikuler.
+         */
+        $data = common_service::get_sidebar_data('ekskul', $userid, $tahunajaranid);
+
         $data['ajaxurl'] = (new \moodle_url('/local/akademikmonitor/pages/walikelas/ekskul/ajax.php'))->out(false);
         $data['sesskey'] = sesskey();
 
-        $groups = common_service::get_group_walikelas($userid);
+        $groups = common_service::get_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
 
         $kelasdata = [];
         $siswaoptions = [];
@@ -159,10 +182,11 @@ class ekskul_service {
             foreach ($siswas as $siswa) {
                 $namasiswa = fullname($siswa);
                 $nisn = !empty($nisnmap[(int)$siswa->id]) ? (string)$nisnmap[(int)$siswa->id] : '-';
+
                 $ekskuls = self::get_ekskul_siswa(
                     (int)$siswa->id,
                     (int)$group->id,
-                    ($semester > 0 ? $semester : null)
+                    $semester
                 );
 
                 $ekskullist = [];
@@ -195,7 +219,7 @@ class ekskul_service {
                         'siswa_nisn' => $nisn,
                         'userid' => (int)$siswa->id,
                         'kelasid' => (int)$group->id,
-                        'semester' => ($semester > 0 ? (int)$semester : 0),
+                        'semester' => (int)$semester,
                         'ekskulid' => '',
                         'nama' => '-',
                         'predikat' => '-',
@@ -232,6 +256,7 @@ class ekskul_service {
 
         $ekskuloptions = [];
         $records = $DB->get_records('ekskul', null, 'nama ASC', 'id, nama');
+
         foreach ($records as $e) {
             $ekskuloptions[] = [
                 'id' => (int)$e->id,
@@ -244,12 +269,21 @@ class ekskul_service {
         $data['ekskul_options'] = $ekskuloptions;
         $data['nokelas'] = empty($kelasdata);
         $data['selectedsemester'] = (int)$semester;
+        $data['selectedtahunajaranid'] = (int)$tahunajaranid;
+        $data['selected_tahunajaranid'] = (int)$tahunajaranid;
+        $data['caneditperiod'] = period_filter_service::can_edit_tahunajaran($tahunajaranid);
+        $data['readonlyperiod'] = !$data['caneditperiod'];
 
         if (!empty($kelasdata)) {
             $data['currentkelasid'] = (int)$kelasdata[0]['kelasid'];
         } else {
             $data['currentkelasid'] = 0;
         }
+
+        $data += period_filter_service::build_filter_data();
+        $data += period_filter_service::get_filter_ui_data(
+            '/local/akademikmonitor/pages/walikelas/ekskul/ekskul.php'
+        );
 
         return $data;
     }

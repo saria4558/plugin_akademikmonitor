@@ -541,5 +541,237 @@ if ($oldversion < 2026040206) {
 
         upgrade_plugin_savepoint(true, 2026050501, 'local', 'akademikmonitor');
     }
+if ($oldversion < 2026050502) {
+
+    // ============================================================
+    // TABLE kartu_ujian
+    // ============================================================
+    $table = new xmldb_table('kartu_ujian');
+
+    if (!$dbman->table_exists($table)) {
+        $table->add_field(
+            'id',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            XMLDB_SEQUENCE,
+            null
+        );
+
+        $table->add_field(
+            'nama_ujian',
+            XMLDB_TYPE_CHAR,
+            '255',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'id_kelas',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'id_tahun_ajaran',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'id_kurikulum',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            null,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'semester',
+            XMLDB_TYPE_CHAR,
+            '20',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            'Ganjil'
+        );
+
+        $table->add_field(
+            'penandatangan',
+            XMLDB_TYPE_CHAR,
+            '255',
+            null,
+            null,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'status',
+            XMLDB_TYPE_CHAR,
+            '20',
+            null,
+            XMLDB_NOTNULL,
+            null,
+            'draft'
+        );
+
+        $table->add_field(
+            'timecreated',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            null,
+            null,
+            null
+        );
+
+        $table->add_field(
+            'timemodified',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            null,
+            null,
+            null
+        );
+
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+
+        $dbman->create_table($table);
+    }
+
+    // Tambahkan index setelah tabel dibuat.
+    $table = new xmldb_table('kartu_ujian');
+
+    $idxkelas = new xmldb_index(
+        'idx_kartu_ujian_kelas',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_kelas']
+    );
+
+    if ($dbman->table_exists($table) && !$dbman->index_exists($table, $idxkelas)) {
+        $dbman->add_index($table, $idxkelas);
+    }
+
+    $idxtahun = new xmldb_index(
+        'idx_kartu_ujian_tahun',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_tahun_ajaran']
+    );
+
+    if ($dbman->table_exists($table) && !$dbman->index_exists($table, $idxtahun)) {
+        $dbman->add_index($table, $idxtahun);
+    }
+
+    $idxstatus = new xmldb_index(
+        'idx_kartu_ujian_status',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['status']
+    );
+
+    if ($dbman->table_exists($table) && !$dbman->index_exists($table, $idxstatus)) {
+        $dbman->add_index($table, $idxstatus);
+    }
+
+    // ============================================================
+    // TABLE kartu_ujian_siswa
+    // ============================================================
+    $table2 = new xmldb_table('kartu_ujian_siswa');
+
+    if (!$dbman->table_exists($table2)) {
+        $table2->add_field(
+            'id',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            XMLDB_SEQUENCE,
+            null
+        );
+
+        $table2->add_field(
+            'id_kartu_ujian',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            null,
+            null
+        );
+
+        $table2->add_field(
+            'id_user',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            XMLDB_NOTNULL,
+            null,
+            null
+        );
+
+        $table2->add_field(
+            'timecreated',
+            XMLDB_TYPE_INTEGER,
+            '10',
+            XMLDB_UNSIGNED,
+            null,
+            null,
+            null
+        );
+
+        $table2->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+
+        $dbman->create_table($table2);
+    }
+
+    // Tambahkan index setelah tabel dibuat.
+    $table2 = new xmldb_table('kartu_ujian_siswa');
+
+    $idxkartu = new xmldb_index(
+        'idx_ku_siswa_kartu',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_kartu_ujian']
+    );
+
+    if ($dbman->table_exists($table2) && !$dbman->index_exists($table2, $idxkartu)) {
+        $dbman->add_index($table2, $idxkartu);
+    }
+
+    $idxuser = new xmldb_index(
+        'idx_ku_siswa_user',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_user']
+    );
+
+    if ($dbman->table_exists($table2) && !$dbman->index_exists($table2, $idxuser)) {
+        $dbman->add_index($table2, $idxuser);
+    }
+
+    $uniq = new xmldb_index(
+        'ux_ku_siswa_kartu_user',
+        XMLDB_INDEX_UNIQUE,
+        ['id_kartu_ujian', 'id_user']
+    );
+
+    if ($dbman->table_exists($table2) && !$dbman->index_exists($table2, $uniq)) {
+        $dbman->add_index($table2, $uniq);
+    }
+
+    upgrade_plugin_savepoint(true, 2026050502, 'local', 'akademikmonitor');
+}
     return true;
 }

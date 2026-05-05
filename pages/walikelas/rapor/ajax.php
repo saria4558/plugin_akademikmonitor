@@ -17,10 +17,17 @@ $action = required_param('action', PARAM_ALPHAEXT);
 
 global $USER;
 
-$waliid = (int) $USER->id;
+$waliid = (int)$USER->id;
 $semester = optional_param('semester', period_filter_service::get_selected_semester(), PARAM_INT);
+$tahunajaranid = period_filter_service::get_selected_tahunajaranid();
 
 try {
+    /*
+     * Semua action di rapor/ajax.php adalah proses simpan.
+     * Maka semuanya wajib ditolak kalau tahun ajaran yang dipilih adalah arsip.
+     */
+    period_filter_service::require_editable_selected_period($tahunajaranid);
+
     switch ($action) {
         case 'save_catatan':
             rapor_service::save_catatan(
@@ -65,13 +72,14 @@ try {
             break;
 
         default:
-            throw new \exception('Action tidak dikenal');
+            throw new \Exception('Action tidak dikenal');
     }
 
     echo json_encode([
         'ok' => true,
         'message' => 'Data rapor berhasil disimpan',
     ]);
+
 } catch (\Throwable $e) {
     echo json_encode([
         'ok' => false,

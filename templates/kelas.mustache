@@ -40,6 +40,7 @@
                 <th style="width:430px;">Aksi</th>
               </tr>
             </thead>
+
             <tbody>
               {{#items}}
               <tr>
@@ -50,20 +51,43 @@
                 <td data-label="Tahun Ajaran">{{tahun_ajaran}}</td>
                 <td data-label="Wali Kelas">{{wali_nama}}</td>
                 <td data-label="Peserta">{{jumlah_peserta}}</td>
+
                 <td data-label="Aksi">
                   <div style="display:flex;gap:6px;flex-wrap:wrap;">
                     <a href="{{peserta_url}}" class="am-btn am-btn-secondary am-btn-sm">Peserta</a>
                     <a href="{{coursemoodle_url}}" class="am-btn am-btn-primary am-btn-sm">Course</a>
                     <a href="{{edit_url}}" class="am-btn am-btn-edit am-btn-sm">Edit</a>
-                    <a href="{{delete_url}}" class="am-btn am-btn-danger am-btn-sm" onclick="return confirm('Yakin hapus kelas ini?')">Hapus</a>
+                    <a href="{{delete_url}}"
+                       class="am-btn am-btn-danger am-btn-sm"
+                       onclick="return confirm('Yakin hapus kelas ini?')">
+                      Hapus
+                    </a>
 
                     {{#is_lulus_status}}
-                      <span class="am-btn am-btn-sm" style="background:#fee2e2;color:#991b1b;cursor:not-allowed;">LULUS</span>
+                      <span class="am-btn am-btn-sm"
+                            style="background:#fee2e2;color:#991b1b;cursor:not-allowed;">
+                        LULUS
+                      </span>
                     {{/is_lulus_status}}
 
-                    {{^is_lulus_status}}
-                      <a href="{{naik_url}}" class="am-btn am-btn-primary am-btn-sm" onclick="return confirm('Proses {{naik_label}} untuk kelas ini? Wali kelas baru akan dikosongkan dan siswa akan disalin ke kelas tahun ajaran berikutnya.')">{{naik_label}}</a>
-                    {{/is_lulus_status}}
+
+                    {{#show_naik_action}}
+                      {{#is_lulus}}
+                        <a href="{{naik_url}}"
+                           class="am-btn am-btn-primary am-btn-sm"
+                           onclick="return confirm('Yakin ingin meluluskan kelas ini?')">
+                          Luluskan
+                        </a>
+                      {{/is_lulus}}
+
+                      {{^is_lulus}}
+                        <a href="{{naik_url}}"
+                           class="am-btn am-btn-primary am-btn-sm"
+                           onclick="return confirm('Proses {{naik_label}} untuk kelas ini? Wali kelas baru akan dikosongkan dan siswa akan disalin ke kelas tahun ajaran berikutnya.')">
+                          {{naik_label}}
+                        </a>
+                      {{/is_lulus}}
+                    {{/show_naik_action}}
 
                     <a href="{{histori_url}}" class="am-btn am-btn-secondary am-btn-sm">Histori</a>
                   </div>
@@ -73,7 +97,9 @@
 
               {{^items}}
               <tr>
-                <td colspan="8" class="am-empty-state" style="text-align:center;padding:24px;">Belum ada data kelas.</td>
+                <td colspan="8" class="am-empty-state" style="text-align:center;padding:24px;">
+                  Belum ada data kelas.
+                </td>
               </tr>
               {{/items}}
             </tbody>

@@ -68,11 +68,6 @@ class period_filter_service {
     private static function get_default_semester_from_config(): int {
         $config = get_config('local_akademikmonitor');
 
-        /*
-         * Support beberapa kemungkinan nama config.
-         * Ini sengaja dibuat fleksibel karena sebelumnya fitur admin kamu
-         * pernah memakai beberapa nama setting.
-         */
         $candidates = [
             $config->active_semester ?? null,
             $config->semesterdefault ?? null,
@@ -98,7 +93,6 @@ class period_filter_service {
 
         if (is_numeric($value)) {
             $semester = (int)$value;
-
             return in_array($semester, [1, 2], true) ? $semester : 0;
         }
 
@@ -124,9 +118,6 @@ class period_filter_service {
 
         $config = get_config('local_akademikmonitor');
 
-        /*
-         * Urutan pertama harus active_tahunajaranid karena ini setting admin aktif.
-         */
         $idcandidates = [
             $config->active_tahunajaranid ?? null,
             $config->tahunajaranid ?? null,
@@ -142,10 +133,6 @@ class period_filter_service {
             }
         }
 
-        /*
-         * Kalau config menyimpan label tahun, misalnya "2025/2026",
-         * cari ke tabel tahun_ajaran.
-         */
         $labelcandidates = [
             $config->tahunpelajarandefault ?? null,
             $config->tahun_ajaran_default ?? null,
@@ -198,6 +185,26 @@ class period_filter_service {
         return 0;
     }
 
+    private static function get_active_tahunajaranid_from_config(): int {
+        global $DB;
+
+        $config = get_config('local_akademikmonitor');
+
+        $idcandidates = [
+            $config->active_tahunajaranid ?? null,
+        ];
+
+        foreach ($idcandidates as $id) {
+            $id = (int)$id;
+
+            if ($id > 0 && $DB->record_exists('tahun_ajaran', ['id' => $id])) {
+                return $id;
+            }
+        }
+
+        return 0;
+    }
+
     private static function get_active_tahunajaranid_from_table(): int {
         global $DB;
 
@@ -242,6 +249,43 @@ class period_filter_service {
         $record = reset($records);
 
         return (int)$record->id;
+    }
+
+    public static function get_active_tahunajaranid(): int {
+        $tahunajaranid = self::get_active_tahunajaranid_from_config();
+
+        if ($tahunajaranid > 0) {
+            return $tahunajaranid;
+        }
+
+        $tahunajaranid = self::get_active_tahunajaranid_from_table();
+
+        if ($tahunajaranid > 0) {
+            return $tahunajaranid;
+        }
+
+        return self::get_default_tahunajaranid_from_config();
+    }
+
+    public static function can_edit_tahunajaran(int $tahunajaranid = 0): bool {
+        if ($tahunajaranid <= 0) {
+            $tahunajaranid = self::get_selected_tahunajaranid();
+        }
+
+        $activeid = self::get_active_tahunajaranid();
+
+        if ($activeid <= 0 || $tahunajaranid <= 0) {
+            return false;
+        }
+
+        return (int)$tahunajaranid === (int)$activeid;
+    }
+    public static function require_editable_selected_period(int $tahunajaranid = 0): void {
+        if (!self::can_edit_tahunajaran($tahunajaranid)) {
+            throw new \Exception(
+                'Tahun ajaran arsip hanya bisa dilihat. Ubah data hanya diperbolehkan pada tahun ajaran aktif.'
+            );
+        }
     }
 
     public static function get_semester_label(int $semester): string {
@@ -312,12 +356,21 @@ class period_filter_service {
     public static function build_filter_data(): array {
         $semester = self::get_selected_semester();
         $tahunajaranid = self::get_selected_tahunajaranid();
+        $activeid = self::get_active_tahunajaranid();
+        $caneditperiod = self::can_edit_tahunajaran($tahunajaranid);
 
         return [
             'selectedsemester' => $semester,
             'selectedtahunajaranid' => $tahunajaranid,
+            'selected_tahunajaranid' => $tahunajaranid,
+
+            'active_tahunajaranid' => $activeid,
+            'caneditperiod' => $caneditperiod,
+            'readonlyperiod' => !$caneditperiod,
+
             'semester_label' => self::get_semester_label($semester),
             'tahunajaran_label' => self::get_tahunajaran_label($tahunajaranid),
+            'active_tahunajaran_label' => self::get_tahunajaran_label($activeid),
 
             'semester_options' => [
                 [
@@ -339,6 +392,8 @@ class period_filter_service {
     public static function get_filter_ui_data(string $actionurl, array $extra = []): array {
         $semester = self::get_selected_semester();
         $tahunajaranid = self::get_selected_tahunajaranid();
+        $activeid = self::get_active_tahunajaranid();
+        $caneditperiod = self::can_edit_tahunajaran($tahunajaranid);
 
         $params = array_merge($extra, [
             'semester' => $semester,
@@ -363,8 +418,16 @@ class period_filter_service {
                 'tahunajaran_options' => self::get_tahunajaran_options($tahunajaranid),
                 'selectedsemester' => $semester,
                 'selectedtahunajaranid' => $tahunajaranid,
+                'selected_tahunajaranid' => $tahunajaranid,
+
+                'active_tahunajaranid' => $activeid,
+                'caneditperiod' => $caneditperiod,
+                'readonlyperiod' => !$caneditperiod,
+
                 'semester_label' => self::get_semester_label($semester),
                 'tahunajaran_label' => self::get_tahunajaran_label($tahunajaranid),
+                'active_tahunajaran_label' => self::get_tahunajaran_label($activeid),
+
                 'extra_params' => self::build_extra_params($extra),
             ],
         ];

@@ -39,10 +39,10 @@ $data = monitoring_service::get_page_data(
     $tahunajaranid
 );
 
-$data['periodfilter'] = period_filter_service::get_filter_ui_data(
-    '/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php',
-    ['courseid' => $data['selected_course'] ?? 0]
-);
+// $data['periodfilter'] = period_filter_service::get_filter_ui_data(
+//     '/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php',
+//     ['courseid' => $data['selected_course'] ?? 0]
+// );
 
 echo $OUTPUT->header();
 

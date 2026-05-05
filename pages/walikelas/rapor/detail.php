@@ -49,18 +49,11 @@ if (!$studentingroup || !$canview) {
     throw new \exception('nopermissions', 'error');
 }
 
-$periodfilterdata = period_filter_service::get_filter_ui_data(
-    '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
-    [
-        'userid' => $userid,
-        'kelasid' => $kelasid,
-    ]
-);
-
-$template['periodfilter'] = $periodfilterdata['periodfilter'] ?? $periodfilterdata;
+$template += period_filter_service::build_filter_data();
 
 $PAGE->requires->css('/local/akademikmonitor/css/walikelasstyles.css');
 $PAGE->requires->css('/local/akademikmonitor/css/styles.css');
+
 $PAGE->requires->js_call_amd('local_akademikmonitor/tabrapor', 'init');
 $PAGE->requires->js_call_amd('local_akademikmonitor/catatan', 'init', [$userid, $kelasid, $semester]);
 $PAGE->requires->js_call_amd('local_akademikmonitor/kenaikan_kelas', 'init', [$userid, $kelasid]);

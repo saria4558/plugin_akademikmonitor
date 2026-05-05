@@ -14,33 +14,41 @@ $redirectparams = period_filter_service::append_filter_params([]);
 try {
     $kelasid = required_param('kelasid', PARAM_INT);
     $semesterform = optional_param('semester', 0, PARAM_INT);
+    $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+
+    /*
+     * Import termasuk aksi mengubah data.
+     * Jadi hanya boleh dilakukan pada tahun ajaran aktif.
+     */
+    period_filter_service::require_editable_selected_period($tahunajaranid);
+
     $semesteraktif = in_array($semesterform, [1, 2], true)
         ? $semesterform
         : period_filter_service::get_selected_semester();
 
     if ($kelasid <= 0) {
-        throw new moodle_exception('Kelas tidak valid saat import ekskul');
+        throw new \Exception('Kelas tidak valid saat import ekskul');
     }
 
     if (!in_array($semesteraktif, [1, 2], true)) {
-        throw new moodle_exception('Semester aktif tidak valid');
+        throw new \Exception('Semester aktif tidak valid');
     }
 
     if (empty($_FILES['csvfile']) || empty($_FILES['csvfile']['tmp_name'])) {
-        throw new moodle_exception('File CSV belum dipilih');
+        throw new \Exception('File CSV belum dipilih');
     }
 
     $tmpname = $_FILES['csvfile']['tmp_name'];
     $handle = fopen($tmpname, 'r');
 
     if (!$handle) {
-        throw new moodle_exception('Gagal membuka file CSV');
+        throw new \Exception('Gagal membuka file CSV');
     }
 
     $header = fgetcsv($handle);
     if (!$header) {
         fclose($handle);
-        throw new moodle_exception('Header CSV tidak ditemukan');
+        throw new \Exception('Header CSV tidak ditemukan');
     }
 
     $header = array_map(function($value) {
@@ -51,7 +59,7 @@ try {
     foreach ($requiredcolumns as $column) {
         if (!in_array($column, $header, true)) {
             fclose($handle);
-            throw new moodle_exception('Kolom CSV wajib: nisn, ekskul, predikat');
+            throw new \Exception('Kolom CSV wajib: nisn, ekskul, predikat');
         }
     }
 
@@ -59,10 +67,16 @@ try {
     $ekskulindex = array_search('ekskul', $header, true);
     $predikatindex = array_search('predikat', $header, true);
 
-    $field = $DB->get_record('user_info_field', ['shortname' => 'nisn'], 'id', IGNORE_MISSING);
+    $field = $DB->get_record(
+        'user_info_field',
+        ['shortname' => 'nisn'],
+        'id',
+        IGNORE_MISSING
+    );
+
     if (!$field) {
         fclose($handle);
-        throw new moodle_exception('Field profil NISN tidak ditemukan');
+        throw new \Exception('Field profil NISN tidak ditemukan');
     }
 
     $imported = 0;
@@ -76,12 +90,10 @@ try {
         $namaekskul = trim((string)($row[$ekskulindex] ?? ''));
         $predikat = strtoupper(trim((string)($row[$predikatindex] ?? '')));
 
-        // Lewati baris kosong penuh.
         if ($nisn === '' && $namaekskul === '' && $predikat === '') {
             continue;
         }
 
-        // Lewati baris tidak lengkap.
         if ($nisn === '' || $namaekskul === '' || $predikat === '') {
             $skipped++;
             continue;
@@ -92,8 +104,10 @@ try {
             continue;
         }
 
-        // Penting: kolom user_info_data.data biasanya TEXT,
-        // jadi harus pakai sql_compare_text().
+        /*
+         * user_info_data.data bertipe TEXT.
+         * Karena itu dibandingkan memakai sql_compare_text().
+         */
         $sql = "SELECT uid.userid
                   FROM {user_info_data} uid
                  WHERE uid.fieldid = :fieldid
@@ -121,7 +135,13 @@ try {
             continue;
         }
 
-        $ekskul = $DB->get_record('ekskul', ['nama' => $namaekskul], 'id', IGNORE_MISSING);
+        $ekskul = $DB->get_record(
+            'ekskul',
+            ['nama' => $namaekskul],
+            'id',
+            IGNORE_MISSING
+        );
+
         if (!$ekskul) {
             $skipped++;
             continue;
@@ -147,7 +167,7 @@ try {
         \core\output\notification::NOTIFY_SUCCESS
     );
 
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     if (isset($handle) && is_resource($handle)) {
         fclose($handle);
     }

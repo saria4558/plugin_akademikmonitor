@@ -1,5 +1,6 @@
 <?php
 define('AJAX_SCRIPT', true);
+
 require_once(__DIR__ . '/../../../../../config.php');
 
 require_login();
@@ -13,6 +14,15 @@ header('Content-Type: application/json; charset=utf-8');
 $action = required_param('action', PARAM_ALPHAEXT);
 
 try {
+    $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+
+    /*
+     * PKL adalah data yang bisa diedit oleh wali kelas.
+     * Kalau tahun ajaran yang dipilih bukan tahun ajaran aktif,
+     * maka proses simpan harus dihentikan.
+     */
+    period_filter_service::require_editable_selected_period($tahunajaranid);
+
     switch ($action) {
         case 'save_pkl':
             $pklid = optional_param('pklid', 0, PARAM_INT);
@@ -48,10 +58,11 @@ try {
             ]);
             break;
     }
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     echo json_encode([
         'ok' => false,
         'message' => $e->getMessage(),
     ]);
 }
+
 exit;

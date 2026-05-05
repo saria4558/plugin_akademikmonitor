@@ -6,6 +6,7 @@ require_sesskey();
 
 use local_akademikmonitor\service\period_filter_service;
 use local_akademikmonitor\service\walikelas\pkl_service;
+use local_akademikmonitor\service\walikelas\common_service;
 
 global $DB;
 
@@ -19,28 +20,32 @@ try {
         : period_filter_service::get_selected_semester();
 
     if ($kelasid <= 0) {
-        throw new moodle_exception('Kelas tidak valid saat import PKL');
+        throw new \exception('Kelas tidak valid saat import PKL');
+    }
+
+    if (!common_service::is_group_kelas_xii($kelasid)) {
+        throw new \exception('Import PKL hanya tersedia untuk kelas XII');
     }
 
     if (!in_array($semesteraktif, [1, 2], true)) {
-        throw new moodle_exception('Semester aktif tidak valid');
+        throw new \exception('Semester aktif tidak valid');
     }
 
     if (empty($_FILES['csvfile']['tmp_name'])) {
-        throw new moodle_exception('File tidak ditemukan');
+        throw new \exception('File tidak ditemukan');
     }
 
     $file = $_FILES['csvfile']['tmp_name'];
     $handle = fopen($file, 'r');
 
     if ($handle === false) {
-        throw new moodle_exception('File tidak bisa dibaca');
+        throw new \exception('File tidak bisa dibaca');
     }
 
     $firstline = fgets($handle);
     if ($firstline === false) {
         fclose($handle);
-        throw new moodle_exception('File kosong');
+        throw new \exception('File kosong');
     }
 
     $firstline = preg_replace('/^\xEF\xBB\xBF/', '', $firstline);
@@ -68,7 +73,7 @@ try {
     $expected = ['nisn', 'mitra', 'waktu_mulai', 'waktu_selesai', 'nilai'];
     if ($header !== $expected) {
         fclose($handle);
-        throw new moodle_exception(
+        throw new \exception(
             'Format header salah. Terbaca: ' . implode('|', $header) .
             '. Harus: nisn,mitra,waktu_mulai,waktu_selesai,nilai'
         );
@@ -77,7 +82,7 @@ try {
     $nisnfield = $DB->get_record('user_info_field', ['shortname' => 'nisn'], 'id', IGNORE_MISSING);
     if (!$nisnfield) {
         fclose($handle);
-        throw new moodle_exception('Field profile NISN tidak ditemukan');
+        throw new \exception('Field profile NISN tidak ditemukan');
     }
 
     $success = 0;

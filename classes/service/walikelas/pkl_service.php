@@ -1,6 +1,6 @@
 <?php
 namespace local_akademikmonitor\service\walikelas;
-
+use local_akademikmonitor\service\period_filter_service;
 defined('MOODLE_INTERNAL') || die();
 
 class pkl_service {
@@ -94,27 +94,31 @@ class pkl_service {
         $nilai = trim($nilai);
 
         if ($userid <= 0) {
-            throw new \moodle_exception('User siswa tidak valid');
+            throw new \exception('User siswa tidak valid');
         }
 
         if ($kelasid <= 0) {
-            throw new \moodle_exception('Kelas tidak valid');
+            throw new \exception('Kelas tidak valid');
+        }
+
+        if (!common_service::is_group_kelas_xii($kelasid)) {
+            throw new \exception('Fitur PKL hanya tersedia untuk kelas XII');
         }
 
         if ($mitraid <= 0) {
-            throw new \moodle_exception('Mitra tidak valid');
+            throw new \exception('Mitra tidak valid');
         }
 
         if (!in_array($semester, [1, 2], true)) {
-            throw new \moodle_exception('Semester harus 1 atau 2');
+            throw new \exception('Semester harus 1 atau 2');
         }
 
         if ($waktu_mulai === '' || $waktu_selesai === '') {
-            throw new \moodle_exception('Tanggal PKL wajib diisi');
+            throw new \exception('Tanggal PKL wajib diisi');
         }
 
         if ($nilai === '') {
-            throw new \moodle_exception('Nilai PKL wajib diisi');
+            throw new \exception('Nilai PKL wajib diisi');
         }
 
         // MODE EDIT: update berdasarkan ID record.
@@ -169,14 +173,26 @@ class pkl_service {
         ]);
     }
 
-    public static function get_page_data(int $userid, int $semester = 0): array {
+    public static function get_page_data(int $userid, int $semester = 0, int $tahunajaranid = 0): array {
         global $DB;
 
-        $data = common_service::get_sidebar_data('pkl');
+        if ($semester <= 0) {
+            $semester = period_filter_service::get_selected_semester();
+        }
+
+        if ($tahunajaranid <= 0) {
+            $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+        }
+
+        $data = common_service::get_sidebar_data('pkl', $userid, $tahunajaranid);
+        $data = common_service::get_sidebar_data('pkl', $userid, $tahunajaranid);
         $data['ajaxurl'] = (new \moodle_url('/local/akademikmonitor/pages/walikelas/pkl/ajax.php'))->out(false);
         $data['sesskey'] = sesskey();
 
-        $groups = common_service::get_group_walikelas($userid);
+        $groups = common_service::filter_groups_kelas_xii(
+            common_service::get_group_walikelas($userid),
+            $tahunajaranid
+        );
 
         $kelasdata = [];
         $siswaoptions = [];
@@ -286,8 +302,14 @@ class pkl_service {
         $data['siswa_options'] = $siswaoptions;
         $data['mitra_options'] = $mitraoptions;
         $data['nokelas'] = empty($kelasdata);
+        $data['only_xii_message'] = 'Fitur PKL hanya tersedia untuk kelas XII. Jika kelas yang dipilih adalah kelas X atau XI, menu dan data PKL tidak ditampilkan.';
         $data['selectedsemester'] = (int)$semester;
+        
+        $data['selectedtahunajaranid'] = (int)$tahunajaranid;
+        $data['selected_tahunajaranid'] = (int)$tahunajaranid;
 
+        $data['caneditperiod'] = period_filter_service::can_edit_tahunajaran($tahunajaranid);
+        $data['readonlyperiod'] = !$data['caneditperiod'];
         if (!empty($kelasdata)) {
             $data['currentkelasid'] = (int)$kelasdata[0]['kelasid'];
         } else {
