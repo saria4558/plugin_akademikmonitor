@@ -401,40 +401,62 @@
               <table class="am-table">
                 <tbody>
                   <tr>
-                    <td rowspan="3" data-label="Jenis">Ketidakhadiran</td>
-                    <td data-label="Keterangan">Sakit</td>
-                    <td data-label="Jumlah">
+                    <td rowspan="3"
+                        data-label="Jenis"
+                        style="vertical-align: middle; text-align: center;">
+                      Ketidakhadiran
+                    </td>
+
+                    <td data-label="Keterangan"
+                        style="vertical-align: middle; text-align: center;">
+                      Sakit
+                    </td>
+
+                    <td data-label="Jumlah"
+                        style="vertical-align: middle;">
                       <input type="number"
-                             class="am-input"
-                             id="hadir-sakit"
-                             {{#readonlyperiod}}disabled{{/readonlyperiod}}
-                             value="{{sakit}}"
-                             min="0"
-                             style="max-width:100px;">
+                            class="am-input"
+                            id="hadir-sakit"
+                            {{#readonlyperiod}}disabled{{/readonlyperiod}}
+                            value="{{sakit}}"
+                            min="0"
+                            style="max-width:100px;">
                     </td>
                   </tr>
+
                   <tr>
-                    <td data-label="Keterangan">Izin</td>
-                    <td data-label="Jumlah">
+                    <td data-label="Keterangan"
+                        style="vertical-align: middle; text-align: center;">
+                      Izin
+                    </td>
+
+                    <td data-label="Jumlah"
+                        style="vertical-align: middle;">
                       <input type="number"
-                             class="am-input"
-                             id="hadir-izin"
-                             {{#readonlyperiod}}disabled{{/readonlyperiod}}
-                             value="{{izin}}"
-                             min="0"
-                             style="max-width:100px;">
+                            class="am-input"
+                            id="hadir-izin"
+                            {{#readonlyperiod}}disabled{{/readonlyperiod}}
+                            value="{{izin}}"
+                            min="0"
+                            style="max-width:100px;">
                     </td>
                   </tr>
+
                   <tr>
-                    <td data-label="Keterangan">Tanpa Keterangan</td>
-                    <td data-label="Jumlah">
+                    <td data-label="Keterangan"
+                        style="vertical-align: middle; text-align: center;">
+                      Tanpa Keterangan
+                    </td>
+
+                    <td data-label="Jumlah"
+                        style="vertical-align: middle;">
                       <input type="number"
-                             class="am-input"
-                             id="hadir-alfa"
-                             {{#readonlyperiod}}disabled{{/readonlyperiod}}
-                             value="{{alfa}}"
-                             min="0"
-                             style="max-width:100px;">
+                            class="am-input"
+                            id="hadir-alfa"
+                            {{#readonlyperiod}}disabled{{/readonlyperiod}}
+                            value="{{alfa}}"
+                            min="0"
+                            style="max-width:100px;">
                     </td>
                   </tr>
                 </tbody>
@@ -442,7 +464,20 @@
             </div>
 
             {{#caneditperiod}}
-            <div class="ketidakhadiran-actions" style="margin-top:12px; display:flex; justify-content:flex-end;">
+            <div class="ketidakhadiran-actions"
+                style="margin-top:12px; display:flex; justify-content:flex-end; gap:10px; flex-wrap:wrap;">
+
+              {{#ketidakhadiran_manual}}
+              <form method="post" action="{{reset_ketidakhadiran_url}}" style="margin:0;">
+                <input type="hidden" name="sesskey" value="{{sesskey}}">
+                <input type="hidden" name="action" value="resetketidakhadiran">
+
+                <button type="submit" class="am-btn am-btn-ghost">
+                  Kembali ke Data Attendance
+                </button>
+              </form>
+              {{/ketidakhadiran_manual}}
+
               <button type="button"
                       class="am-btn am-btn-primary"
                       id="save-ketidakhadiran">

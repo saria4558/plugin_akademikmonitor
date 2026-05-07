@@ -773,5 +773,136 @@ if ($oldversion < 2026050502) {
 
     upgrade_plugin_savepoint(true, 2026050502, 'local', 'akademikmonitor');
 }
+if ($oldversion < 2026050503) {
+    $table = new xmldb_table('rapor_nilai_sikap');
+
+    $table->add_field(
+        'id',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        XMLDB_NOTNULL,
+        XMLDB_SEQUENCE,
+        null
+    );
+
+    $table->add_field(
+        'id_siswa',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        XMLDB_NOTNULL,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'id_kelas',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        XMLDB_NOTNULL,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'semester',
+        XMLDB_TYPE_INTEGER,
+        '4',
+        XMLDB_UNSIGNED,
+        XMLDB_NOTNULL,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'id_tahun_ajaran',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        XMLDB_NOTNULL,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'nilai_sikap',
+        XMLDB_TYPE_CHAR,
+        '1',
+        null,
+        XMLDB_NOTNULL,
+        null,
+        'A'
+    );
+
+    $table->add_field(
+        'id_penginput',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        null,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'timecreated',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        null,
+        null,
+        null
+    );
+
+    $table->add_field(
+        'timemodified',
+        XMLDB_TYPE_INTEGER,
+        '10',
+        XMLDB_UNSIGNED,
+        null,
+        null,
+        null
+    );
+
+    $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+
+    if (!$dbman->table_exists($table)) {
+        $dbman->create_table($table);
+    }
+
+    $idxsiswa = new xmldb_index(
+        'idx_rns_siswa',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_siswa']
+    );
+
+    if (!$dbman->index_exists($table, $idxsiswa)) {
+        $dbman->add_index($table, $idxsiswa);
+    }
+
+    $idxkelas = new xmldb_index(
+        'idx_rns_kelas',
+        XMLDB_INDEX_NOTUNIQUE,
+        ['id_kelas']
+    );
+
+    if (!$dbman->index_exists($table, $idxkelas)) {
+        $dbman->add_index($table, $idxkelas);
+    }
+
+    $uniquerapor = new xmldb_index(
+        'ux_rns_siswa_kelas_sem_ta',
+        XMLDB_INDEX_UNIQUE,
+        ['id_siswa', 'id_kelas', 'semester', 'id_tahun_ajaran']
+    );
+
+    if (!$dbman->index_exists($table, $uniquerapor)) {
+        $dbman->add_index($table, $uniquerapor);
+    }
+
+    upgrade_plugin_savepoint(true, 2026050503, 'local', 'akademikmonitor');
+}
     return true;
 }

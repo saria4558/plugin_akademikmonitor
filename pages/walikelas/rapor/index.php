@@ -10,6 +10,32 @@ global $PAGE, $OUTPUT, $USER;
 
 $semester = period_filter_service::get_selected_semester();
 $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_sesskey();
+
+    period_filter_service::require_editable_selected_period($tahunajaranid);
+
+    $kelasid = required_param('kelasid', PARAM_INT);
+    $sikapdata = optional_param_array('sikap', [], PARAM_ALPHA);
+
+    rapor_service::save_nilai_sikap_kelas(
+        $kelasid,
+        $semester,
+        $tahunajaranid,
+        $sikapdata,
+        (int)$USER->id
+    );
+
+    redirect(
+        new moodle_url(
+            '/local/akademikmonitor/pages/walikelas/rapor/index.php',
+            period_filter_service::append_filter_params([])
+        ),
+        'Nilai sikap berhasil disimpan.',
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
+}
 
 $PAGE->set_url('/local/akademikmonitor/pages/walikelas/rapor/index.php', [
     'semester' => $semester,

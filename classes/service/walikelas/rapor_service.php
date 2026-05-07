@@ -233,153 +233,343 @@ private static function get_generated_courses_by_kelas(int $kelasid, int $semest
         return $out;
     }
 
-    public static function get_raport_kelas(int $groupid, int $waliuserid = 0, int $semester = 0): array {
-        global $DB;
+public static function get_raport_kelas(
+    int $groupid,
+    int $waliuserid = 0,
+    int $semester = 0,
+    int $tahunajaranid = 0,
+    int $kelasid = 0
+): array {
+    global $DB;
 
-        $students = common_service::get_siswa_group($groupid, $waliuserid);
+    if ($groupid <= 0) {
+        return [];
+    }
 
-        if (!$students) {
-            return [];
+    if ($semester <= 0) {
+        $semester = period_filter_service::get_selected_semester();
+    }
+
+    if ($tahunajaranid <= 0) {
+        $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
+    }
+
+    /*
+     * $groupid adalah ID group Moodle.
+     * $kelasid adalah ID kelas custom dari tabel {kelas}.
+     *
+     * Nilai sikap disimpan berdasarkan ID kelas custom agar tidak campur
+     * dengan tahun ajaran atau group Moodle yang berbeda.
+     */
+    if ($kelasid <= 0) {
+        $kelasid = common_service::get_generated_kelasid_from_group($groupid);
+    }
+
+    $students = common_service::get_siswa_group($groupid, $waliuserid);
+
+    if (!$students) {
+        return [];
+    }
+
+    $courses = self::get_mapel_by_kelas($groupid, $semester);
+    $courseids = array_map('intval', array_keys($courses));
+
+    if (!$courseids) {
+        return [];
+    }
+
+    $userids = array_map('intval', array_keys($students));
+    $nisnmap = common_service::get_nisn_map_by_userids($userids);
+
+    $sum = [];
+
+    foreach ($userids as $uid) {
+        $sum[$uid] = 0.0;
+    }
+
+    foreach ($courseids as $cid) {
+        $gi = $DB->get_record(
+            'grade_items',
+            [
+                'courseid' => $cid,
+                'itemtype' => 'course',
+            ],
+            'id',
+            IGNORE_MISSING
+        );
+
+        if (!$gi) {
+            continue;
         }
 
-        $courses = self::get_mapel_by_kelas($groupid, $semester);
-        $courseids = array_map('intval', array_keys($courses));
+        [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'userid');
+        $params['itemid'] = (int)$gi->id;
 
-        if (!$courseids) {
-            return [];
-        }
-
-        $userids = array_map('intval', array_keys($students));
-        $nisnmap = common_service::get_nisn_map_by_userids($userids);
-
-        $sum = [];
+        $grades = $DB->get_records_select(
+            'grade_grades',
+            "itemid = :itemid AND userid {$insql}",
+            $params,
+            '',
+            'userid, finalgrade'
+        );
 
         foreach ($userids as $uid) {
-            $sum[$uid] = 0.0;
+            $g = $grades[$uid] ?? null;
+            $sum[$uid] += ($g && $g->finalgrade !== null) ? (float)$g->finalgrade : 0.0;
         }
-
-        foreach ($courseids as $cid) {
-            $gi = $DB->get_record(
-                'grade_items',
-                ['courseid' => $cid, 'itemtype' => 'course'],
-                'id',
-                IGNORE_MISSING
-            );
-
-            if (!$gi) {
-                continue;
-            }
-
-            [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'userid');
-            $params['itemid'] = (int)$gi->id;
-
-            $grades = $DB->get_records_select(
-                'grade_grades',
-                "itemid = :itemid AND userid {$insql}",
-                $params,
-                '',
-                'userid, finalgrade'
-            );
-
-            foreach ($userids as $uid) {
-                $g = $grades[$uid] ?? null;
-                $sum[$uid] += ($g && $g->finalgrade !== null) ? (float)$g->finalgrade : 0.0;
-            }
-        }
-
-        $data = [];
-        $coursecount = count($courseids);
-
-        foreach ($students as $u) {
-            $uid = (int)$u->id;
-            $jumlah = $sum[$uid] ?? 0.0;
-
-            $data[] = (object)[
-                'id' => $uid,
-                'firstname' => (string)($u->firstname ?? ''),
-                'lastname' => (string)($u->lastname ?? ''),
-                'nisn' => !empty($nisnmap[$uid]) ? (string)$nisnmap[$uid] : '-',
-                'jumlah' => $jumlah,
-                'rata_rata' => $coursecount > 0 ? ($jumlah / $coursecount) : 0.0,
-            ];
-        }
-
-        usort($data, static function($a, $b) {
-            return $b->jumlah <=> $a->jumlah;
-        });
-
-        return self::format_raport($data);
     }
 
-    private static function format_raport(array $data): array {
-        $result = [];
-        $rank = 1;
-        $lastnilai = null;
-        $no = 0;
+    $data = [];
+    $coursecount = count($courseids);
 
-        foreach ($data as $d) {
-            $no++;
+    foreach ($students as $u) {
+        $uid = (int)$u->id;
+        $jumlah = $sum[$uid] ?? 0.0;
 
-            $userid = (int)($d->id ?? 0);
-            $jumlahrounded = round((float)$d->jumlah, 0);
-
-            if ($lastnilai !== $jumlahrounded) {
-                $rank = $no;
-            }
-
-            $result[] = [
-                'userid' => $userid,
-                'no' => $no,
-                'nama' => trim((string)$d->firstname . ' ' . (string)$d->lastname),
-                'nisn' => !empty($d->nisn) ? (string)$d->nisn : '-',
-                'rata_rata' => round((float)$d->rata_rata, 0),
-                'jumlah' => $jumlahrounded,
-                'ranking' => $rank,
-                'nilai_sikap' => 'A',
-                'detail_url' => (new \moodle_url(
-                    '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
-                    ['userid' => $userid]
-                ))->out(false),
-            ];
-
-            $lastnilai = $jumlahrounded;
-        }
-
-        return $result;
+        $data[] = (object)[
+            'id' => $uid,
+            'firstname' => (string)($u->firstname ?? ''),
+            'lastname' => (string)($u->lastname ?? ''),
+            'nisn' => !empty($nisnmap[$uid]) ? (string)$nisnmap[$uid] : '-',
+            'jumlah' => $jumlah,
+            'rata_rata' => $coursecount > 0 ? ($jumlah / $coursecount) : 0.0,
+        ];
     }
 
-    public static function get_student_ranking_summary(
-        int $userid,
-        int $groupid,
-        int $waliuserid = 0,
-        int $semester = 0
-    ): array {
-        $rows = self::get_raport_kelas($groupid, $waliuserid, $semester);
+    usort($data, static function($a, $b) {
+        return $b->jumlah <=> $a->jumlah;
+    });
 
-        if (!$rows) {
-            return [
-                'jumlah' => 0.0,
-                'ranking' => 0,
-                'total_siswa' => 0,
-            ];
+    /*
+     * Ambil nilai sikap dari tabel baru.
+     * Kalau belum ada data, nanti default tetap A di format_raport().
+     */
+    $sikapmap = self::get_nilai_sikap_map(
+        $userids,
+        $kelasid,
+        $semester,
+        $tahunajaranid
+    );
+
+    return self::format_raport($data, $sikapmap);
+}
+private static function get_nilai_sikap_map(
+    array $userids,
+    int $kelasid,
+    int $semester,
+    int $tahunajaranid
+): array {
+    global $DB;
+
+    $userids = array_values(array_unique(array_filter(array_map('intval', $userids))));
+
+    if (!$userids || $kelasid <= 0 || $semester <= 0 || $tahunajaranid <= 0) {
+        return [];
+    }
+
+    /*
+     * Pengaman agar halaman rapor tidak rusak kalau tabel belum terbuat.
+     * Setelah upgrade berhasil, tabel ini akan terbaca normal.
+     */
+    $dbman = $DB->get_manager();
+
+    if (!$dbman->table_exists(new \xmldb_table('rapor_nilai_sikap'))) {
+        return [];
+    }
+
+    [$insql, $params] = $DB->get_in_or_equal($userids, SQL_PARAMS_NAMED, 'userid');
+
+    $params['kelasid'] = $kelasid;
+    $params['semester'] = $semester;
+    $params['tahunajaranid'] = $tahunajaranid;
+
+    $records = $DB->get_records_select(
+        'rapor_nilai_sikap',
+        "id_siswa {$insql}
+         AND id_kelas = :kelasid
+         AND semester = :semester
+         AND id_tahun_ajaran = :tahunajaranid",
+        $params,
+        '',
+        'id, id_siswa, nilai_sikap'
+    );
+
+    $map = [];
+
+    foreach ($records as $record) {
+        $userid = (int)($record->id_siswa ?? 0);
+        $nilai = strtoupper(trim((string)($record->nilai_sikap ?? '')));
+
+        if ($userid > 0 && in_array($nilai, ['A', 'B', 'C', 'D'], true)) {
+            $map[$userid] = $nilai;
+        }
+    }
+
+    return $map;
+}
+
+public static function save_nilai_sikap_kelas(
+    int $kelasid,
+    int $semester,
+    int $tahunajaranid,
+    array $sikapdata,
+    int $penginputid
+): void {
+    global $DB;
+
+    if ($kelasid <= 0 || $semester <= 0 || $tahunajaranid <= 0) {
+        throw new \exception('invaliddata', 'error');
+    }
+
+    $dbman = $DB->get_manager();
+
+    if (!$dbman->table_exists(new \xmldb_table('rapor_nilai_sikap'))) {
+        throw new \exception(
+            'Tabel rapor_nilai_sikap belum tersedia. Jalankan upgrade plugin terlebih dahulu.'
+        );
+    }
+
+    $allowed = ['A', 'B', 'C', 'D'];
+    $now = time();
+
+    foreach ($sikapdata as $userid => $nilai) {
+        $userid = (int)$userid;
+        $nilai = strtoupper(trim((string)$nilai));
+
+        if ($userid <= 0 || !in_array($nilai, $allowed, true)) {
+            continue;
         }
 
-        foreach ($rows as $row) {
-            if ((int)($row['userid'] ?? 0) === $userid) {
-                return [
-                    'jumlah' => (float)($row['jumlah'] ?? 0),
-                    'ranking' => (int)($row['ranking'] ?? 0),
-                    'total_siswa' => count($rows),
-                ];
-            }
+        $conditions = [
+            'id_siswa' => $userid,
+            'id_kelas' => $kelasid,
+            'semester' => $semester,
+            'id_tahun_ajaran' => $tahunajaranid,
+        ];
+
+        $existing = $DB->get_record(
+            'rapor_nilai_sikap',
+            $conditions,
+            '*',
+            IGNORE_MISSING
+        );
+
+        if ($existing) {
+            $existing->nilai_sikap = $nilai;
+            $existing->id_penginput = $penginputid;
+            $existing->timemodified = $now;
+
+            $DB->update_record('rapor_nilai_sikap', $existing);
+            continue;
         }
 
+        $record = (object)[
+            'id_siswa' => $userid,
+            'id_kelas' => $kelasid,
+            'semester' => $semester,
+            'id_tahun_ajaran' => $tahunajaranid,
+            'nilai_sikap' => $nilai,
+            'id_penginput' => $penginputid,
+            'timecreated' => $now,
+            'timemodified' => $now,
+        ];
+
+        $DB->insert_record('rapor_nilai_sikap', $record);
+    }
+}
+private static function format_raport(array $data, array $sikapmap = []): array {
+    $result = [];
+    $rank = 1;
+    $lastnilai = null;
+    $no = 0;
+
+    foreach ($data as $d) {
+        $no++;
+
+        $userid = (int)($d->id ?? 0);
+        $jumlahrounded = round((float)$d->jumlah, 0);
+
+        if ($lastnilai !== $jumlahrounded) {
+            $rank = $no;
+        }
+
+        $nilaisikap = strtoupper(trim((string)($sikapmap[$userid] ?? 'A')));
+
+        if (!in_array($nilaisikap, ['A', 'B', 'C', 'D'], true)) {
+            $nilaisikap = 'A';
+        }
+
+        $result[] = [
+            'userid' => $userid,
+            'no' => $no,
+            'nama' => trim((string)$d->firstname . ' ' . (string)$d->lastname),
+            'nisn' => !empty($d->nisn) ? (string)$d->nisn : '-',
+            'rata_rata' => round((float)$d->rata_rata, 0),
+            'jumlah' => $jumlahrounded,
+            'ranking' => $rank,
+
+            /*
+             * Nilai sikap lama sebelumnya hardcode A.
+             * Sekarang diambil dari tabel rapor_nilai_sikap.
+             */
+            'nilai_sikap' => $nilaisikap,
+            'sikap_a' => ($nilaisikap === 'A'),
+            'sikap_b' => ($nilaisikap === 'B'),
+            'sikap_c' => ($nilaisikap === 'C'),
+            'sikap_d' => ($nilaisikap === 'D'),
+
+            'detail_url' => (new \moodle_url(
+                '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
+                ['userid' => $userid]
+            ))->out(false),
+        ];
+
+        $lastnilai = $jumlahrounded;
+    }
+
+    return $result;
+}
+
+public static function get_student_ranking_summary(
+    int $userid,
+    int $groupid,
+    int $waliuserid = 0,
+    int $semester = 0,
+    int $tahunajaranid = 0,
+    int $kelasid = 0
+): array {
+    $rows = self::get_raport_kelas(
+        $groupid,
+        $waliuserid,
+        $semester,
+        $tahunajaranid,
+        $kelasid
+    );
+
+    if (!$rows) {
         return [
             'jumlah' => 0.0,
             'ranking' => 0,
-            'total_siswa' => count($rows),
+            'total_siswa' => 0,
         ];
     }
+
+    foreach ($rows as $row) {
+        if ((int)($row['userid'] ?? 0) === $userid) {
+            return [
+                'jumlah' => (float)($row['jumlah'] ?? 0),
+                'ranking' => (int)($row['ranking'] ?? 0),
+                'total_siswa' => count($rows),
+            ];
+        }
+    }
+
+    return [
+        'jumlah' => 0.0,
+        'ranking' => 0,
+        'total_siswa' => count($rows),
+    ];
+}
 
 public static function get_page_data(int $userid, int $semester = 1, int $tahunajaranid = 0): array {
     if ($semester <= 0) {
@@ -392,17 +582,32 @@ public static function get_page_data(int $userid, int $semester = 1, int $tahuna
 
     $data = common_service::get_sidebar_data('rapor', $userid, $tahunajaranid);
 
-    $group = common_service::get_first_group_walikelas_by_tahunajaran($userid, $tahunajaranid);
+    $group = common_service::get_first_group_walikelas_by_tahunajaran(
+        $userid,
+        $tahunajaranid
+    );
 
     if (!$group) {
         $data['nokelas'] = true;
-
         $data += period_filter_service::build_filter_data();
 
         return $data;
     }
 
-    $rows = array_values(self::get_raport_kelas((int)$group->id, $userid, $semester));
+    /*
+     * $group->id adalah ID group Moodle.
+     * $kelasid adalah ID kelas custom dari tabel {kelas}.
+     */
+    $groupid = (int)$group->id;
+    $kelasid = common_service::get_generated_kelasid_from_group($groupid);
+
+    $rows = array_values(self::get_raport_kelas(
+        $groupid,
+        $userid,
+        $semester,
+        $tahunajaranid,
+        $kelasid
+    ));
 
     foreach ($rows as $index => $row) {
         $studentid = (int)($row['userid'] ?? 0);
@@ -411,19 +616,36 @@ public static function get_page_data(int $userid, int $semester = 1, int $tahuna
             '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
             period_filter_service::append_filter_params([
                 'userid' => $studentid,
-                'kelasid' => (int)$group->id,
+
+                /*
+                 * Detail rapor masih memakai groupid, karena halaman detail
+                 * mengecek keanggotaan siswa berdasarkan groups_members.
+                 */
+                'kelasid' => $groupid,
             ])
         ))->out(false);
     }
 
     $data['kelas'] = (string)$group->name;
     $data['rows'] = $rows;
+
+    /*
+     * Ini dipakai di form simpan nilai sikap.
+     * Yang dikirim adalah ID kelas custom, sesuai tabel rapor_nilai_sikap.
+     */
+    $data['kelasid'] = $kelasid;
+    $data['groupid'] = $groupid;
+    $data['sesskey'] = sesskey();
+    $data['save_sikap_url'] = (new \moodle_url(
+        '/local/akademikmonitor/pages/walikelas/rapor/index.php',
+        period_filter_service::append_filter_params([])
+    ))->out(false);
+
     $data['selectedsemester'] = $semester;
     $data['selectedtahunajaranid'] = $tahunajaranid;
     $data['selected_tahunajaranid'] = $tahunajaranid;
 
     $data += period_filter_service::build_filter_data();
-    
 
     return $data;
 }
@@ -1385,25 +1607,24 @@ private static function normalize_attendance_status_for_rapor(string $acronym, s
     $text = \core_text::strtolower(trim($acronym . ' ' . $description));
 
     /*
-     * Mapping status Attendance Moodle ke format rapor.
-     *
-     * P / Present / Hadir       => hadir
-     * L / Late / Terlambat      => hadir
-     * A / Absent / Alfa         => alfa
-     * E / Excused / Izin        => izin
-     * I / Izin                  => izin
-     * S / Sick / Sakit          => sakit
+     * Mapping Attendance Moodle ke format rapor:
+     * Present / P / Hadir      => hadir
+     * Late / L / Terlambat     => hadir
+     * Excused / E / Izin       => izin
+     * Sick / S / Sakit         => sakit
+     * Absent / A / Alfa        => alfa
      */
-    if (preg_match('/\b(a|alfa|alpha|absent|tidak hadir|tanpa keterangan)\b/u', $text)) {
-        return 'alfa';
-    }
-
-    if (preg_match('/\b(i|izin|ijin|excused|permission)\b/u', $text)) {
-        return 'izin';
-    }
 
     if (preg_match('/\b(s|sakit|sick)\b/u', $text)) {
         return 'sakit';
+    }
+
+    if (preg_match('/\b(e|excused|izin|ijin|permission)\b/u', $text)) {
+        return 'izin';
+    }
+
+    if (preg_match('/\b(a|alfa|alpha|absent|tidak hadir|tanpa keterangan)\b/u', $text)) {
+        return 'alfa';
     }
 
     return 'hadir';
@@ -1595,7 +1816,23 @@ public static function save_ketidakhadiran(
         'timemodified' => $now,
     ]);
 }
+public static function reset_ketidakhadiran_manual(
+    int $userid,
+    int $kelasid,
+    int $semester
+): void {
+    global $DB;
 
+    if ($userid <= 0 || $kelasid <= 0 || $semester <= 0) {
+        throw new \exception('Data reset ketidakhadiran tidak valid.');
+    }
+
+    $DB->delete_records('rapor_ketidakhadiran', [
+        'id_siswa' => $userid,
+        'id_kelas' => $kelasid,
+        'semester' => $semester,
+    ]);
+}
     public static function format_tanggal_indo(?string $tanggal): string {
         if (empty($tanggal)) {
             return '-';
@@ -2028,6 +2265,15 @@ private static function get_datadiri_array(\stdClass $user, \stdClass $profile):
             'ketidakhadiran_auto' => (($ketidakhadiran->source ?? '') === 'attendance_daily'),
             'ketidakhadiran_manual' => (($ketidakhadiran->source ?? '') === 'manual'),
             'ketidakhadiran_empty' => (($ketidakhadiran->source ?? '') === 'empty'),
+            'reset_ketidakhadiran_url' => (new \moodle_url(
+                '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
+                period_filter_service::append_filter_params([
+                    'userid' => $userid,
+                    'kelasid' => $kelasid,
+                ])
+            ))->out(false),
+
+            'sesskey' => sesskey(),
             'semester' => $semester,
             'semester_label' => period_filter_service::get_semester_label($semester),
             'tahunajaranid' => $tahunajaranid,
@@ -2268,7 +2514,14 @@ private static function get_custom_kelasid_from_generated_groupid(int $groupid):
             'tahunajaran_label' => $kelasrapor['tahun_pelajaran'],
             'datadiri' => self::get_datadiri_array($user, $profile),
             'nilai_akademik' => self::get_nilai_akademik_detail($userid, $kelasid, $semester),
-            'ringkasan_ranking' => self::get_student_ranking_summary($userid, $kelasid, $walikelasid, $semester),
+'ringkasan_ranking' => self::get_student_ranking_summary(
+    $userid,
+    $kelasid,
+    $walikelasid,
+    $semester,
+    $tahunajaranid,
+    self::get_custom_kelasid_from_generated_groupid($kelasid)
+),
             'show_pkl' => $showpkl,
             'pkl' => $showpkl ? pkl_service::get_pkl_siswa($userid, $kelasid, $semester) : [],
             'ekskul' => ekskul_service::get_ekskul_siswa($userid, $kelasid, $semester),

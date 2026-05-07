@@ -528,20 +528,24 @@ public static function group_matches_tahunajaran(int $groupid, int $tahunajarani
 
     public static function get_sidebar_data(string $active = '', int $userid = 0, int $tahunajaranid = 0): array {
         $showpklmenu = true;
+
         if ($userid > 0) {
             $showpklmenu = self::wali_has_kelas_xii($userid, $tahunajaranid);
         }
 
         return [
             'show_pkl_menu' => $showpklmenu,
+
             'is_dashboard' => ($active === 'dashboard'),
             'is_monitoring_kelas' => ($active === 'monitoring'),
+            'is_monitoring_presensi' => ($active === 'presensi'),
             'is_ekskul_siswa' => ($active === 'ekskul'),
             'is_pkl_siswa' => ($active === 'pkl'),
             'is_raport' => ($active === 'rapor'),
 
             'dashboard_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/dashboard.php'))->out(false),
             'monitoring_kelas_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/monitoring/monitoring.php'))->out(false),
+            'monitoring_presensi_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/presensi/index.php'))->out(false),
             'ekskul_siswa_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/ekskul/ekskul.php'))->out(false),
             'pkl_siswa_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/pkl/pkl.php'))->out(false),
             'raport_url' => (new \moodle_url('/local/akademikmonitor/pages/walikelas/rapor/index.php'))->out(false),

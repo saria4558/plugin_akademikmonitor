@@ -2,7 +2,9 @@
 require_once(__DIR__ . '/../../../../../config.php');
 
 require_login();
+
 global $CFG, $PAGE, $OUTPUT, $USER, $DB;
+
 use local_akademikmonitor\service\period_filter_service;
 use local_akademikmonitor\service\walikelas\rapor_service;
 
@@ -10,6 +12,8 @@ require_once($CFG->libdir . '/accesslib.php');
 
 $userid = required_param('userid', PARAM_INT);
 $kelasidparam = optional_param('kelasid', 0, PARAM_INT);
+$action = optional_param('action', '', PARAM_ALPHA);
+
 $semester = period_filter_service::get_selected_semester();
 $tahunajaranid = period_filter_service::get_selected_tahunajaranid();
 
@@ -32,6 +36,7 @@ $PAGE->set_url('/local/akademikmonitor/pages/walikelas/rapor/detail.php', [
     'semester' => $semester,
     'tahunajaranid' => $tahunajaranid,
 ]);
+
 $PAGE->set_context($systemcontext);
 $PAGE->set_pagelayout('standard');
 $PAGE->set_title('Detail Raport');
@@ -47,6 +52,41 @@ $canview = has_capability('local/akademikmonitor:viewrapor', $systemcontext)
 
 if (!$studentingroup || !$canview) {
     throw new \exception('nopermissions', 'error');
+}
+
+/*
+ * Action reset ketidakhadiran manual.
+ *
+ * Fungsi ini hanya menghapus data manual dari tabel rapor_ketidakhadiran.
+ * Setelah data manual dihapus, halaman detail rapor akan kembali membaca
+ * data otomatis dari Attendance Moodle melalui rapor_service::get_ketidakhadiran().
+ *
+ * Filter semester dan tahun ajaran tetap aman karena:
+ * - $semester tetap berasal dari period_filter_service::get_selected_semester()
+ * - $tahunajaranid tetap berasal dari period_filter_service::get_selected_tahunajaranid()
+ * - redirect tetap memakai period_filter_service::append_filter_params()
+ */
+if ($action === 'resetketidakhadiran') {
+    require_sesskey();
+
+    rapor_service::reset_ketidakhadiran_manual(
+        $userid,
+        $kelasid,
+        $semester
+    );
+
+    redirect(
+        new moodle_url(
+            '/local/akademikmonitor/pages/walikelas/rapor/detail.php',
+            period_filter_service::append_filter_params([
+                'userid' => $userid,
+                'kelasid' => $kelasid,
+            ])
+        ),
+        'Data ketidakhadiran berhasil dikembalikan ke data Attendance.',
+        null,
+        \core\output\notification::NOTIFY_SUCCESS
+    );
 }
 
 $template += period_filter_service::build_filter_data();
