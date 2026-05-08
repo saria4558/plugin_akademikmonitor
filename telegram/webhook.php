@@ -11,6 +11,10 @@ $raw = file_get_contents('php://input');
 
 if (!$raw) {
     http_response_code(200);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "✅ Webhook Akademik Monitor aktif.\n";
+    echo "URL ini sudah bisa diakses.\n";
+    echo "Webhook menunggu request dari Telegram.";
     exit;
 }
 
@@ -18,6 +22,8 @@ $data = json_decode($raw, true);
 
 if (!is_array($data) || empty($data['message'])) {
     http_response_code(200);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'OK';
     exit;
 }
 
@@ -28,6 +34,8 @@ $username = trim((string)($message['from']['username'] ?? ''));
 
 if ($chatid === '' || $text === '') {
     http_response_code(200);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'OK';
     exit;
 }
 

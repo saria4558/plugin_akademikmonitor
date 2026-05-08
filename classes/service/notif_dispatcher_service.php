@@ -481,107 +481,135 @@ class notif_dispatcher_service {
      * 2. EVENT NILAI DI BAWAH KKTP
      * ============================================================ */
 
-    protected static function process_event_kktp(\stdClass $rule): void {
-        global $DB;
+protected static function process_event_kktp(\stdClass $rule): void {
+    global $DB;
 
-        $offsetdays = (int)($rule->offset_days ?? 0);
-        $sendtime = trim((string)($rule->send_time ?? '07:00:00'));
-        $keyword = trim((string)($rule->event_keyword ?? ''));
-        $recipientconfig = (string)($rule->recipients ?? '');
+    $offsetdays = (int)($rule->offset_days ?? 0);
+    $sendtime = trim((string)($rule->send_time ?? '07:00:00'));
+    $keyword = trim((string)($rule->event_keyword ?? ''));
+    $recipientconfig = (string)($rule->recipients ?? '');
 
-        mtrace('[akademikmonitor] Rule nilai_kktp mulai.');
-        mtrace('[akademikmonitor] offset_days = ' . $offsetdays);
-        mtrace('[akademikmonitor] send_time = ' . $sendtime);
-        mtrace('[akademikmonitor] event_keyword = ' . $keyword);
-        mtrace('[akademikmonitor] recipients = ' . $recipientconfig);
+    mtrace('[akademikmonitor] Rule nilai_kktp mulai.');
+    mtrace('[akademikmonitor] offset_days = ' . $offsetdays);
+    mtrace('[akademikmonitor] send_time = ' . $sendtime);
+    mtrace('[akademikmonitor] event_keyword = ' . $keyword);
+    mtrace('[akademikmonitor] recipients = ' . $recipientconfig);
 
-        if (!self::is_now_in_send_window($sendtime)) {
-            mtrace('[akademikmonitor] STOP nilai_kktp: belum masuk jam kirim.');
-            return;
+    if (!self::is_now_in_send_window($sendtime)) {
+        mtrace('[akademikmonitor] STOP nilai_kktp: belum masuk jam kirim.');
+        return;
+    }
+
+    $sendtosiswa = self::has_recipient($recipientconfig, ['siswa', 'student']);
+    $sendtowali = self::has_recipient($recipientconfig, ['wali', 'wali kelas', 'walikelas']);
+    $sendtoguru = self::has_recipient($recipientconfig, ['guru', 'teacher']);
+
+    mtrace('[akademikmonitor] target siswa = ' . ($sendtosiswa ? 'YA' : 'TIDAK'));
+    mtrace('[akademikmonitor] target wali = ' . ($sendtowali ? 'YA' : 'TIDAK'));
+    mtrace('[akademikmonitor] target guru = ' . ($sendtoguru ? 'YA' : 'TIDAK'));
+
+    if (!$sendtosiswa && !$sendtowali && !$sendtoguru) {
+        mtrace('[akademikmonitor] STOP nilai_kktp: tidak punya target penerima.');
+        return;
+    }
+
+    /*
+     * Event diambil dari kalender Moodle.
+     *
+     * Perubahan penting:
+     * - Sebelumnya hanya mengambil event yang punya courseid > 0.
+     * - Sekarang site event juga dibaca.
+     *
+     * Kalau event punya courseid:
+     *   event hanya dipakai untuk course itu.
+     *
+     * Kalau event tidak punya courseid / courseid = 0:
+     *   event dianggap event global dari admin,
+     *   lalu sistem mengecek semua generated course Akademik Monitor.
+     */
+    $start = strtotime('today +' . $offsetdays . ' day');
+    $end = strtotime('tomorrow +' . $offsetdays . ' day') - 1;
+
+    mtrace('[akademikmonitor] range event mulai = ' . date('Y-m-d H:i:s', $start));
+    mtrace('[akademikmonitor] range event akhir = ' . date('Y-m-d H:i:s', $end));
+
+    $params = [
+        'starttime' => $start,
+        'endtime' => $end,
+    ];
+
+    $select = 'timestart >= :starttime AND timestart <= :endtime';
+
+    if ($keyword !== '') {
+        $select .= ' AND (' .
+            $DB->sql_like('name', ':kw1', false) .
+            ' OR ' .
+            $DB->sql_like('description', ':kw2', false) .
+            ')';
+
+        $params['kw1'] = '%' . $DB->sql_like_escape($keyword) . '%';
+        $params['kw2'] = '%' . $DB->sql_like_escape($keyword) . '%';
+    }
+
+    $events = $DB->get_records_select(
+        'event',
+        $select,
+        $params,
+        'timestart ASC',
+        'id, name, description, timestart, courseid'
+    );
+
+    mtrace('[akademikmonitor] jumlah event nilai_kktp ditemukan = ' . count($events));
+
+    if (!$events) {
+        mtrace('[akademikmonitor] STOP nilai_kktp: tidak ada event cocok.');
+        return;
+    }
+
+    foreach ($events as $event) {
+        mtrace('[akademikmonitor] proses event: ' . format_string($event->name));
+        mtrace('[akademikmonitor] eventid = ' . (int)$event->id);
+        mtrace('[akademikmonitor] event courseid = ' . (int)($event->courseid ?? 0));
+
+        $targetcourses = self::get_kktp_target_courses_for_event($event);
+
+        mtrace('[akademikmonitor] jumlah target course KKTP = ' . count($targetcourses));
+
+        if (!$targetcourses) {
+            mtrace('[akademikmonitor] SKIP event: tidak ada target course untuk dicek.');
+            continue;
         }
 
-        $sendtosiswa = self::has_recipient($recipientconfig, ['siswa', 'student']);
-        $sendtowali = self::has_recipient($recipientconfig, ['wali', 'wali kelas', 'walikelas']);
-        $sendtoguru = self::has_recipient($recipientconfig, ['guru', 'teacher']);
-
-        mtrace('[akademikmonitor] target siswa = ' . ($sendtosiswa ? 'YA' : 'TIDAK'));
-        mtrace('[akademikmonitor] target wali = ' . ($sendtowali ? 'YA' : 'TIDAK'));
-        mtrace('[akademikmonitor] target guru = ' . ($sendtoguru ? 'YA' : 'TIDAK'));
-
-        if (!$sendtosiswa && !$sendtowali && !$sendtoguru) {
-            mtrace('[akademikmonitor] STOP nilai_kktp: tidak punya target penerima.');
-            return;
-        }
-
-        $start = strtotime('today +' . $offsetdays . ' day');
-        $end = strtotime('tomorrow +' . $offsetdays . ' day') - 1;
-
-        mtrace('[akademikmonitor] range event mulai = ' . date('Y-m-d H:i:s', $start));
-        mtrace('[akademikmonitor] range event akhir = ' . date('Y-m-d H:i:s', $end));
-
-        $params = [
-            'starttime' => $start,
-            'endtime' => $end,
-        ];
-
-        $select = 'timestart >= :starttime AND timestart <= :endtime AND courseid > 0';
-
-        if ($keyword !== '') {
-            $select .= ' AND (' .
-                $DB->sql_like('name', ':kw1', false) .
-                ' OR ' .
-                $DB->sql_like('description', ':kw2', false) .
-                ')';
-
-            $params['kw1'] = '%' . $DB->sql_like_escape($keyword) . '%';
-            $params['kw2'] = '%' . $DB->sql_like_escape($keyword) . '%';
-        }
-
-        $events = $DB->get_records_select(
-            'event',
-            $select,
-            $params,
-            'timestart ASC',
-            'id, name, description, timestart, courseid'
+        $scheduledat = date(
+            'Y-m-d H:i:s',
+            strtotime(date('Y-m-d', (int)$event->timestart) . ' ' . $sendtime)
         );
 
-        mtrace('[akademikmonitor] jumlah event nilai_kktp ditemukan = ' . count($events));
+        $eventdate = userdate((int)$event->timestart, '%d %B %Y %H:%M');
 
-        if (!$events) {
-            mtrace('[akademikmonitor] STOP nilai_kktp: tidak ada event cocok.');
-            return;
-        }
+        foreach ($targetcourses as $course) {
+            $courseid = (int)$course->id;
 
-        foreach ($events as $event) {
-            $courseid = (int)($event->courseid ?? 0);
+            /*
+             * Clone event supaya courseid dan coursename sesuai course yang sedang dicek.
+             * Ini penting untuk pesan, log, guru mapel, dan wali kelas.
+             */
+            $eventcourse = clone $event;
+            $eventcourse->courseid = $courseid;
+            $eventcourse->coursename = format_string($course->fullname);
 
-            if ($courseid <= 0) {
-                mtrace('[akademikmonitor] SKIP event: event tidak punya courseid. Event ID=' . (int)$event->id);
-                continue;
-            }
-
-            $course = $DB->get_record('course', ['id' => $courseid], 'id, fullname', IGNORE_MISSING);
-
-            if (!$course) {
-                mtrace('[akademikmonitor] SKIP event: course tidak ditemukan. courseid=' . $courseid);
-                continue;
-            }
-
-            $event->coursename = format_string($course->fullname);
-
-            mtrace('[akademikmonitor] proses event: ' . format_string($event->name));
+            mtrace('[akademikmonitor] cek course KKTP: ' . $eventcourse->coursename);
             mtrace('[akademikmonitor] courseid = ' . $courseid);
-            mtrace('[akademikmonitor] course = ' . $event->coursename);
 
             $kktpinfo = self::get_course_kktp_info($courseid);
 
             if (!$kktpinfo) {
-                mtrace('[akademikmonitor] SKIP event: KKTP course belum ditemukan. courseid=' . $courseid);
+                mtrace('[akademikmonitor] SKIP course: KKTP course belum ditemukan. courseid=' . $courseid);
                 continue;
             }
 
             if ((float)$kktpinfo->kktp <= 0) {
-                mtrace('[akademikmonitor] SKIP event: KKTP course masih 0/kosong. courseid=' . $courseid);
+                mtrace('[akademikmonitor] SKIP course: KKTP course masih 0/kosong. courseid=' . $courseid);
                 continue;
             }
 
@@ -590,7 +618,7 @@ class notif_dispatcher_service {
             mtrace('[akademikmonitor] jumlah siswa course event = ' . count($students));
 
             if (!$students) {
-                mtrace('[akademikmonitor] SKIP event: tidak ada siswa pada course event.');
+                mtrace('[akademikmonitor] SKIP course: tidak ada siswa pada course ini.');
                 continue;
             }
 
@@ -601,7 +629,7 @@ class notif_dispatcher_service {
             $grades = self::get_course_total_grades($courseid, $studentids);
 
             if (!$grades) {
-                mtrace('[akademikmonitor] SKIP event: belum ada nilai course total untuk siswa.');
+                mtrace('[akademikmonitor] SKIP course: belum ada nilai course total untuk siswa.');
                 continue;
             }
 
@@ -637,25 +665,18 @@ class notif_dispatcher_service {
                 }
             }
 
-            mtrace('[akademikmonitor] jumlah siswa nilai < KKTP = ' . count($underkktp));
+            mtrace('[akademikmonitor] jumlah siswa nilai < KKTP pada course ini = ' . count($underkktp));
 
             if (!$underkktp) {
-                mtrace('[akademikmonitor] SKIP event: tidak ada siswa nilai di bawah KKTP.');
+                mtrace('[akademikmonitor] SKIP course: tidak ada siswa nilai di bawah KKTP.');
                 continue;
             }
-
-            $scheduledat = date(
-                'Y-m-d H:i:s',
-                strtotime(date('Y-m-d', (int)$event->timestart) . ' ' . $sendtime)
-            );
-
-            $eventdate = userdate((int)$event->timestart, '%d %B %Y %H:%M');
 
             if ($sendtosiswa) {
                 foreach ($underkktp as $item) {
                     self::send_event_kktp_to_student(
                         $item,
-                        $event,
+                        $eventcourse,
                         $kktpinfo,
                         $offsetdays,
                         $eventdate,
@@ -670,7 +691,10 @@ class notif_dispatcher_service {
                 foreach ($underkktp as $item) {
                     $student = $item['user'];
 
-                    $walis = self::get_walikelas_for_student_in_course((int)$student->id, $courseid);
+                    $walis = self::get_walikelas_for_student_in_course(
+                        (int)$student->id,
+                        $courseid
+                    );
 
                     mtrace('[akademikmonitor] jumlah wali untuk siswa ' . fullname($student) . ' = ' . count($walis));
 
@@ -694,7 +718,7 @@ class notif_dispatcher_service {
                     self::send_event_kktp_to_wali(
                         $data['user'],
                         array_values($data['items']),
-                        $event,
+                        $eventcourse,
                         $kktpinfo,
                         $offsetdays,
                         $eventdate,
@@ -712,7 +736,7 @@ class notif_dispatcher_service {
                     self::send_event_kktp_to_teacher(
                         $teacher,
                         array_values($underkktp),
-                        $event,
+                        $eventcourse,
                         $kktpinfo,
                         $offsetdays,
                         $eventdate,
@@ -722,6 +746,7 @@ class notif_dispatcher_service {
             }
         }
     }
+}
 
     protected static function send_event_kktp_to_student(
         array $item,
@@ -754,7 +779,9 @@ class notif_dispatcher_service {
             return;
         }
 
-        if (notif_service::has_log_been_sent((int)$student->id, 'pengingat_event_kktp_siswa', 0, (int)$event->id, $scheduledat)) {
+        $logrulecode = 'pengingat_event_kktp_siswa_c' . (int)$event->courseid;
+
+        if (notif_service::has_log_been_sent((int)$student->id, $logrulecode, 0, (int)$event->id, $scheduledat)) {
             mtrace('[akademikmonitor] SKIP event_kktp siswa: log sent sudah ada.');
             return;
         }
@@ -782,7 +809,7 @@ class notif_dispatcher_service {
         self::safe_save_delivery_log(
             (int)$student->id,
             (int)$event->courseid,
-            'pengingat_event_kktp_siswa',
+            $logrulecode,
             0,
             (int)$event->id,
             format_string($event->name) . ' - Nilai < KKTP',
@@ -827,7 +854,9 @@ class notif_dispatcher_service {
             return;
         }
 
-        if (notif_service::has_log_been_sent((int)$wali->id, 'pengingat_event_kktp_wali', 0, (int)$event->id, $scheduledat)) {
+        $logrulecode = 'pengingat_event_kktp_wali_c' . (int)$event->courseid;
+
+        if (notif_service::has_log_been_sent((int)$wali->id, $logrulecode, 0, (int)$event->id, $scheduledat)) {
             mtrace('[akademikmonitor] SKIP event_kktp wali: log sent sudah ada.');
             return;
         }
@@ -868,7 +897,7 @@ class notif_dispatcher_service {
         self::safe_save_delivery_log(
             (int)$wali->id,
             (int)$event->courseid,
-            'pengingat_event_kktp_wali',
+            $logrulecode,
             0,
             (int)$event->id,
             format_string($event->name) . ' - Wali Nilai < KKTP',
@@ -913,7 +942,9 @@ class notif_dispatcher_service {
             return;
         }
 
-        if (notif_service::has_log_been_sent((int)$teacher->id, 'pengingat_event_kktp_guru', 0, (int)$event->id, $scheduledat)) {
+        $logrulecode = 'pengingat_event_kktp_guru_c' . (int)$event->courseid;
+
+        if (notif_service::has_log_been_sent((int)$teacher->id, $logrulecode, 0, (int)$event->id, $scheduledat)) {
             mtrace('[akademikmonitor] SKIP event_kktp guru: log sent sudah ada.');
             return;
         }
@@ -954,7 +985,7 @@ class notif_dispatcher_service {
         self::safe_save_delivery_log(
             (int)$teacher->id,
             (int)$event->courseid,
-            'pengingat_event_kktp_guru',
+            $logrulecode,
             0,
             (int)$event->id,
             format_string($event->name) . ' - Guru Nilai < KKTP',
@@ -966,43 +997,57 @@ class notif_dispatcher_service {
         );
     }
 
-    protected static function get_course_kktp_info(int $courseid): ?\stdClass {
-        global $DB;
+protected static function get_course_kktp_info(int $courseid): ?\stdClass {
+    global $DB;
 
-        $courseid = (int)$courseid;
+    $courseid = (int)$courseid;
 
-        if ($courseid <= 0) {
-            return null;
-        }
-
-        $sql = "SELECT cm.id,
-                       cm.id_course,
-                       cm.id_kurikulum_mapel,
-                       km.id_mapel,
-                       km.kktp,
-                       mp.nama_mapel AS nama_mapel
-                  FROM {course_mapel} cm
-                  JOIN {kurikulum_mapel} km ON km.id = cm.id_kurikulum_mapel
-             LEFT JOIN {mata_pelajaran} mp ON mp.id = km.id_mapel
-                 WHERE cm.id_course = :courseid
-              ORDER BY cm.id ASC";
-
-        $records = $DB->get_records_sql($sql, ['courseid' => $courseid], 0, 1);
-
-        if (!$records) {
-            return null;
-        }
-
-        $record = reset($records);
-        $record->kktp = (float)($record->kktp ?? 0);
-
-        if (empty($record->nama_mapel)) {
-            $course = $DB->get_record('course', ['id' => $courseid], 'id, fullname', IGNORE_MISSING);
-            $record->nama_mapel = $course ? format_string($course->fullname) : '-';
-        }
-
-        return $record;
+    if ($courseid <= 0) {
+        return null;
     }
+
+    /*
+     * Tabel course_mapel di plugin ini tidak selalu punya kolom id.
+     * Karena itu jangan SELECT cm.id dan jangan ORDER BY cm.id.
+     *
+     * Yang dibutuhkan untuk mencari KKTP hanya:
+     * - cm.id_course
+     * - cm.id_kurikulum_mapel
+     * - km.kktp
+     * - mp.nama_mapel
+     */
+    $sql = "SELECT cm.id_course,
+                   cm.id_kurikulum_mapel,
+                   km.id_mapel,
+                   km.kktp,
+                   mp.nama_mapel AS nama_mapel
+              FROM {course_mapel} cm
+              JOIN {kurikulum_mapel} km ON km.id = cm.id_kurikulum_mapel
+         LEFT JOIN {mata_pelajaran} mp ON mp.id = km.id_mapel
+             WHERE cm.id_course = :courseid";
+
+    $records = $DB->get_records_sql($sql, ['courseid' => $courseid], 0, 1);
+
+    if (!$records) {
+        return null;
+    }
+
+    $record = reset($records);
+    $record->kktp = (float)($record->kktp ?? 0);
+
+    if (empty($record->nama_mapel)) {
+        $course = $DB->get_record(
+            'course',
+            ['id' => $courseid],
+            'id, fullname',
+            IGNORE_MISSING
+        );
+
+        $record->nama_mapel = $course ? format_string($course->fullname) : '-';
+    }
+
+    return $record;
+}
 
     protected static function get_course_total_grades(int $courseid, array $userids): array {
         global $DB;
@@ -1158,67 +1203,51 @@ class notif_dispatcher_service {
      * 4. HELPER
      * ============================================================ */
 
-    protected static function get_course_students(int $courseid): array {
-        $context = \context_course::instance($courseid);
+protected static function get_course_students(int $courseid): array {
+    $context = \context_course::instance($courseid);
 
-        $students = get_enrolled_users(
-            $context,
-            '',
-            0,
-            'u.id, u.firstname, u.lastname, u.firstnamephonetic, u.lastnamephonetic, u.middlename, u.alternatename, u.email, u.deleted, u.suspended'
+    $students = get_enrolled_users(
+        $context,
+        '',
+        0,
+        'u.id, u.firstname, u.lastname, u.firstnamephonetic, u.lastnamephonetic, u.middlename, u.alternatename, u.email, u.deleted, u.suspended'
+    );
+
+    if (!$students) {
+        return [];
+    }
+
+    $studentrole = self::get_student_role();
+
+    if (!$studentrole) {
+        mtrace('[akademikmonitor] Role student tidak ditemukan.');
+        return [];
+    }
+
+    $out = [];
+
+    foreach ($students as $user) {
+        if (!empty($user->deleted) || !empty($user->suspended)) {
+            continue;
+        }
+
+        $userid = (int)$user->id;
+
+        $isstudent = user_has_role_assignment(
+            $userid,
+            (int)$studentrole->id,
+            (int)$context->id
         );
 
-        if (!$students) {
-            return [];
+        if (!$isstudent) {
+            continue;
         }
 
-        $studentrole = self::get_student_role();
-
-        if (!$studentrole) {
-            mtrace('[akademikmonitor] Role student tidak ditemukan.');
-            return [];
-        }
-
-        $walikelasroleids = self::get_walikelas_role_ids();
-
-        $out = [];
-
-        foreach ($students as $user) {
-            if (!empty($user->deleted) || !empty($user->suspended)) {
-                continue;
-            }
-
-            $userid = (int)$user->id;
-
-            $isstudent = user_has_role_assignment(
-                $userid,
-                (int)$studentrole->id,
-                (int)$context->id
-            );
-
-            if (!$isstudent) {
-                continue;
-            }
-
-            $iswalikelas = false;
-
-            foreach ($walikelasroleids as $roleid) {
-                if (user_has_role_assignment($userid, (int)$roleid, (int)$context->id)) {
-                    $iswalikelas = true;
-                    break;
-                }
-            }
-
-            if ($iswalikelas) {
-                mtrace('[akademikmonitor] SKIP user wali kelas dari daftar siswa: ' . fullname($user) . ' | userid=' . $userid);
-                continue;
-            }
-
-            $out[] = $user;
-        }
-
-        return $out;
+        $out[] = $user;
     }
+
+    return $out;
+}
 
     protected static function get_course_teachers(int $courseid): array {
         $context = \context_course::instance($courseid);
@@ -1360,128 +1389,172 @@ protected static function get_kelasid_from_courseid(int $courseid): int {
 
     return 0;
 }
-    protected static function get_walikelas_users_from_groups(
-        array $groupids,
-        int $studentid,
-        array $walikelasroleids
-    ): array {
-        global $DB;
+protected static function get_kktp_target_courses_for_event(\stdClass $event): array {
+    global $DB;
 
-        $groupids = array_values(array_unique(array_filter(array_map('intval', $groupids))));
-        $walikelasroleids = array_values(array_unique(array_filter(array_map('intval', $walikelasroleids))));
-        $studentid = (int)$studentid;
+    $eventcourseid = (int)($event->courseid ?? 0);
 
-        if (!$groupids || !$walikelasroleids || $studentid <= 0) {
-            return [];
-        }
-
-        $memberships = $DB->get_records_list(
-            'groups_members',
-            'groupid',
-            $groupids,
-            'userid ASC',
-            'id, groupid, userid'
+    /*
+     * Konsep:
+     *
+     * 1. Kalau event dibuat di course hasil generate Akademik Monitor,
+     *    maka sistem hanya mengecek course itu saja.
+     *
+     * 2. Kalau event dibuat sebagai site event / event global kalender Moodle,
+     *    biasanya courseid bisa 0 atau bisa mengarah ke frontpage/site course.
+     *    Dalam kondisi ini, sistem mengecek semua generated course Akademik Monitor.
+     *
+     * Kenapa tidak cukup cek courseid > 0?
+     * Karena site event Moodle bisa saja tetap punya courseid frontpage.
+     * Jadi yang dicek bukan hanya courseid, tapi juga idnumber course-nya.
+     */
+    if ($eventcourseid > 0) {
+        $course = $DB->get_record(
+            'course',
+            ['id' => $eventcourseid],
+            'id, fullname, idnumber, visible',
+            IGNORE_MISSING
         );
 
-        if (!$memberships) {
-            return [];
-        }
-
-        $candidateids = [];
-
-        foreach ($memberships as $membership) {
-            $userid = (int)$membership->userid;
-
-            if ($userid <= 0) {
-                continue;
+        if ($course && self::is_generated_akademikmonitor_course($course)) {
+            if (isset($course->visible) && (int)$course->visible === 0) {
+                mtrace('[akademikmonitor] target course event tidak visible. courseid=' . $eventcourseid);
+                return [];
             }
 
-            if ($userid === $studentid) {
-                continue;
-            }
-
-            $candidateids[] = $userid;
+            return [(int)$course->id => $course];
         }
 
-        $candidateids = array_values(array_unique(array_filter($candidateids)));
-
-        if (!$candidateids) {
-            return [];
-        }
-
-        $roleassignments = $DB->get_records_list(
-            'role_assignments',
-            'userid',
-            $candidateids,
-            'userid ASC',
-            'id, userid, roleid, contextid'
-        );
-
-        if (!$roleassignments) {
-            return [];
-        }
-
-        $walikelasids = [];
-
-        foreach ($roleassignments as $assignment) {
-            if (in_array((int)$assignment->roleid, $walikelasroleids, true)) {
-                $walikelasids[] = (int)$assignment->userid;
-            }
-        }
-
-        $walikelasids = array_values(array_unique(array_filter($walikelasids)));
-
-        if (!$walikelasids) {
-            return [];
-        }
-
-        $users = $DB->get_records_list(
-            'user',
-            'id',
-            $walikelasids,
-            'firstname ASC, lastname ASC',
-            'id, firstname, lastname, firstnamephonetic, lastnamephonetic, middlename, alternatename, email, deleted, suspended'
-        );
-
-        if (!$users) {
-            return [];
-        }
-
-        $result = [];
-
-        foreach ($users as $user) {
-            if (!empty($user->deleted) || !empty($user->suspended)) {
-                continue;
-            }
-
-            $result[(int)$user->id] = $user;
-        }
-
-        return array_values($result);
+        /*
+         * Kalau courseid ada tapi bukan course generated Akademik Monitor,
+         * event ini dianggap global/site event.
+         */
+        mtrace('[akademikmonitor] event bukan course generated Akademik Monitor, diproses sebagai event global. courseid=' . $eventcourseid);
     }
 
-    protected static function resolve_event_recipients(\stdClass $event, string $recipientconfig): array {
-        $users = [];
+    /*
+     * Event global:
+     * Ambil semua course hasil generate Akademik Monitor.
+     */
+    $likegeneratednew = $DB->sql_like('idnumber', ':newpattern', false);
+    $likegeneratedold = $DB->sql_like('idnumber', ':oldpattern', false);
 
-        if (!empty($event->courseid)) {
-            if (self::has_recipient($recipientconfig, ['siswa', 'student'])) {
-                $users = array_merge($users, self::get_course_students((int)$event->courseid));
-            }
+    $select = "idnumber <> ''
+               AND ({$likegeneratednew} OR {$likegeneratedold})";
 
-            if (self::has_recipient($recipientconfig, ['guru', 'teacher', 'wali', 'wali kelas', 'walikelas'])) {
-                $users = array_merge($users, self::get_course_teachers((int)$event->courseid));
-            }
-        }
+    $params = [
+        'newpattern' => 'AM-TA%-K%-KM%-S%',
+        'oldpattern' => 'AM-K%-KM%-S%',
+    ];
 
-        $unique = [];
+    $courses = $DB->get_records_select(
+        'course',
+        $select,
+        $params,
+        'fullname ASC',
+        'id, fullname, idnumber, visible'
+    );
 
-        foreach ($users as $user) {
-            $unique[(int)$user->id] = $user;
-        }
-
-        return array_values($unique);
+    if (!$courses) {
+        mtrace('[akademikmonitor] tidak ada generated course Akademik Monitor untuk event global KKTP.');
+        return [];
     }
 
+    $out = [];
+
+    foreach ($courses as $course) {
+        if (isset($course->visible) && (int)$course->visible === 0) {
+            continue;
+        }
+
+        $out[(int)$course->id] = $course;
+    }
+
+    return $out;
+}
+protected static function is_generated_akademikmonitor_course(\stdClass $course): bool {
+    $idnumber = trim((string)($course->idnumber ?? ''));
+
+    if ($idnumber === '') {
+        return false;
+    }
+
+    if (preg_match('/^AM-TA\d+-K\d+-KM\d+-S\d+$/', $idnumber)) {
+        return true;
+    }
+
+    if (preg_match('/^AM-K\d+-KM\d+-S\d+$/', $idnumber)) {
+        return true;
+    }
+
+    return false;
+}
+protected static function resolve_event_recipients(\stdClass $event, string $recipientconfig): array {
+    $users = [];
+
+    if (!empty($event->courseid)) {
+        $courseid = (int)$event->courseid;
+
+        if (self::has_recipient($recipientconfig, ['siswa', 'student'])) {
+            $users = array_merge($users, self::get_course_students($courseid));
+        }
+
+        if (self::has_recipient($recipientconfig, ['guru', 'teacher'])) {
+            $users = array_merge($users, self::get_course_teachers($courseid));
+        }
+
+        if (self::has_recipient($recipientconfig, ['wali', 'wali kelas', 'walikelas'])) {
+            $users = array_merge($users, self::get_walikelas_by_course($courseid));
+        }
+    }
+
+    $unique = [];
+
+    foreach ($users as $user) {
+        $unique[(int)$user->id] = $user;
+    }
+
+    return array_values($unique);
+}
+protected static function get_walikelas_by_course(int $courseid): array {
+    global $DB;
+
+    $kelasid = self::get_kelasid_from_courseid($courseid);
+
+    if ($kelasid <= 0) {
+        mtrace('[akademikmonitor] STOP wali event: kelasid tidak ditemukan dari courseid=' . $courseid);
+        return [];
+    }
+
+    $kelas = $DB->get_record(
+        'kelas',
+        ['id' => $kelasid],
+        'id, id_user',
+        IGNORE_MISSING
+    );
+
+    if (!$kelas || empty($kelas->id_user)) {
+        mtrace('[akademikmonitor] STOP wali event: kelas.id_user kosong. kelasid=' . $kelasid);
+        return [];
+    }
+
+    $wali = $DB->get_record(
+        'user',
+        ['id' => (int)$kelas->id_user],
+        'id, firstname, lastname, firstnamephonetic, lastnamephonetic, middlename, alternatename, email, deleted, suspended',
+        IGNORE_MISSING
+    );
+
+    if (!$wali) {
+        return [];
+    }
+
+    if (!empty($wali->deleted) || !empty($wali->suspended)) {
+        return [];
+    }
+
+    return [(int)$wali->id => $wali];
+}
     protected static function get_student_role(): ?\stdClass {
         global $DB;
 
@@ -1515,45 +1588,7 @@ protected static function get_teacher_role_ids(): array {
     return [(int)$role->id];
 }
 
-    protected static function get_walikelas_role_ids(): array {
-        global $DB;
 
-        $roles = $DB->get_records(
-            'role',
-            null,
-            'id ASC',
-            'id, shortname, name'
-        );
-
-        if (!$roles) {
-            return [];
-        }
-
-        $ids = [];
-
-        foreach ($roles as $role) {
-            $shortname = strtolower(trim((string)$role->shortname));
-            $name = strtolower(trim((string)$role->name));
-
-            $shortclean = str_replace([' ', '-', '_'], '', $shortname);
-            $nameclean = str_replace([' ', '-', '_'], '', $name);
-
-            $iswalikelas =
-                $shortclean === 'walikelas'
-                || $shortclean === 'homeroomteacher'
-                || $nameclean === 'walikelas'
-                || (
-                    strpos($name, 'wali') !== false
-                    && strpos($name, 'kelas') !== false
-                );
-
-            if ($iswalikelas) {
-                $ids[] = (int)$role->id;
-            }
-        }
-
-        return array_values(array_unique(array_filter($ids)));
-    }
 
     protected static function has_recipient(string $recipientconfig, array $needles): bool {
         $recipientconfig = strtolower(trim($recipientconfig));
