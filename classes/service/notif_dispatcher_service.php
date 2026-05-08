@@ -1259,84 +1259,107 @@ class notif_dispatcher_service {
         return array_values($out);
     }
 
-    protected static function get_walikelas_for_student_in_course(int $studentid, int $courseid): array {
-        global $DB;
+protected static function get_walikelas_for_student_in_course(int $studentid, int $courseid): array {
+    global $DB;
 
-        $studentid = (int)$studentid;
-        $courseid = (int)$courseid;
+    $studentid = (int)$studentid;
+    $courseid = (int)$courseid;
 
-        if ($studentid <= 0) {
-            return [];
-        }
-
-        $walikelasroleids = self::get_walikelas_role_ids();
-
-        if (!$walikelasroleids) {
-            mtrace('[akademikmonitor] Role wali kelas tidak ditemukan. Cek shortname/nama role.');
-            return [];
-        }
-
-        $studentmemberships = $DB->get_records(
-            'groups_members',
-            ['userid' => $studentid],
-            'groupid ASC',
-            'id, groupid'
-        );
-
-        if (!$studentmemberships) {
-            mtrace('[akademikmonitor] siswa userid=' . $studentid . ' tidak punya group.');
-            return [];
-        }
-
-        $groupids = [];
-
-        foreach ($studentmemberships as $membership) {
-            $groupids[] = (int)$membership->groupid;
-        }
-
-        $groupids = array_values(array_unique(array_filter($groupids)));
-
-        if (!$groupids) {
-            return [];
-        }
-
-        $prioritygroupids = [];
-
-        if ($courseid > 0) {
-            $groupsincourse = $DB->get_records_list(
-                'groups',
-                'id',
-                $groupids,
-                'id ASC',
-                'id, courseid'
-            );
-
-            foreach ($groupsincourse as $group) {
-                if ((int)$group->courseid === $courseid) {
-                    $prioritygroupids[] = (int)$group->id;
-                }
-            }
-
-            $prioritygroupids = array_values(array_unique(array_filter($prioritygroupids)));
-        }
-
-        $walikelas = self::get_walikelas_users_from_groups(
-            $prioritygroupids,
-            $studentid,
-            $walikelasroleids
-        );
-
-        if ($walikelas) {
-            return $walikelas;
-        }
-
-        return self::get_walikelas_users_from_groups(
-            $groupids,
-            $studentid,
-            $walikelasroleids
-        );
+    if ($studentid <= 0 || $courseid <= 0) {
+        return [];
     }
 
+    /*
+     * Wali kelas di plugin ini tidak wajib punya role khusus bernama walikelas.
+     * Wali kelas utama disimpan di tabel kelas.id_user.
+     *
+     * Alurnya:
+     * course Moodle -> idnumber course -> id kelas -> kelas.id_user -> user wali kelas.
+     */
+    $kelasid = self::get_kelasid_from_courseid($courseid);
+
+    if ($kelasid <= 0) {
+        mtrace('[akademikmonitor] STOP wali: kelasid tidak ditemukan dari courseid=' . $courseid);
+        return [];
+    }
+
+    $kelas = $DB->get_record(
+        'kelas',
+        ['id' => $kelasid],
+        'id, nama, tingkat, id_user',
+        IGNORE_MISSING
+    );
+
+    if (!$kelas) {
+        mtrace('[akademikmonitor] STOP wali: data kelas tidak ditemukan. kelasid=' . $kelasid);
+        return [];
+    }
+
+    $waliid = (int)($kelas->id_user ?? 0);
+
+    if ($waliid <= 0) {
+        mtrace('[akademikmonitor] STOP wali: kelas.id_user kosong. kelasid=' . $kelasid);
+        return [];
+    }
+
+    $wali = $DB->get_record(
+        'user',
+        ['id' => $waliid],
+        'id, firstname, lastname, firstnamephonetic, lastnamephonetic, middlename, alternatename, email, deleted, suspended',
+        IGNORE_MISSING
+    );
+
+    if (!$wali) {
+        mtrace('[akademikmonitor] STOP wali: user wali kelas tidak ditemukan. userid=' . $waliid);
+        return [];
+    }
+
+    if (!empty($wali->deleted) || !empty($wali->suspended)) {
+        mtrace('[akademikmonitor] STOP wali: user wali kelas deleted/suspended. userid=' . $waliid);
+        return [];
+    }
+
+    return [(int)$wali->id => $wali];
+}
+protected static function get_kelasid_from_courseid(int $courseid): int {
+    global $DB;
+
+    $courseid = (int)$courseid;
+
+    if ($courseid <= 0) {
+        return 0;
+    }
+
+    $course = $DB->get_record(
+        'course',
+        ['id' => $courseid],
+        'id, idnumber',
+        IGNORE_MISSING
+    );
+
+    if (!$course || empty($course->idnumber)) {
+        return 0;
+    }
+
+    $idnumber = trim((string)$course->idnumber);
+
+    /*
+     * Format baru:
+     * AM-TA{id_tahunajaran}-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     *
+     * Format lama:
+     * AM-K{id_kelas}-KM{id_kurikulum_mapel}-S{semester}
+     */
+    if (preg_match('/-K(\d+)-/', $idnumber, $matches)) {
+        return (int)$matches[1];
+    }
+
+    if (preg_match('/^AM-K(\d+)-/', $idnumber, $matches)) {
+        return (int)$matches[1];
+    }
+
+    return 0;
+}
     protected static function get_walikelas_users_from_groups(
         array $groupids,
         int $studentid,
@@ -1467,29 +1490,30 @@ class notif_dispatcher_service {
         return $role ?: null;
     }
 
-    protected static function get_teacher_role_ids(): array {
-        global $DB;
+protected static function get_teacher_role_ids(): array {
+    global $DB;
 
-        $roles = $DB->get_records_list(
-            'role',
-            'shortname',
-            ['editingteacher', 'teacher'],
-            'id ASC',
-            'id, shortname'
-        );
+    /*
+     * Guru mapel harus diambil dari role editingteacher saja.
+     *
+     * Kenapa tidak pakai teacher?
+     * Karena di plugin ini role teacher dipakai untuk wali kelas viewer.
+     * Kalau teacher ikut dihitung sebagai guru, wali kelas akan salah terbaca
+     * sebagai guru mapel di semua course kelasnya.
+     */
+    $role = $DB->get_record(
+        'role',
+        ['shortname' => 'editingteacher'],
+        'id, shortname',
+        IGNORE_MISSING
+    );
 
-        if (!$roles) {
-            return [];
-        }
-
-        $ids = [];
-
-        foreach ($roles as $role) {
-            $ids[] = (int)$role->id;
-        }
-
-        return array_values(array_unique(array_filter($ids)));
+    if (!$role) {
+        return [];
     }
+
+    return [(int)$role->id];
+}
 
     protected static function get_walikelas_role_ids(): array {
         global $DB;

@@ -1,3 +1,4 @@
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 <div class="container-fluid py-3">
   <div style="max-width: 760px; margin: 0 auto;">
     <div class="card shadow-sm" style="border-radius: 12px; overflow: hidden;">
@@ -30,19 +31,16 @@
           <li>Selesai! Notifikasi tugas dan nilai akan otomatis terkirim ke Telegram kamu.</li>
         </ol>
 
-        {{#hasbot}}
-          <div style="text-align:center; margin-bottom: 20px;">
-            <a href="{{connect_url}}" target="_blank" rel="noopener"
-              style="display:inline-flex; align-items:center; justify-content:center; gap:10px; min-width:280px; text-align:center; padding:16px 24px; background:#eaf4ff; color:#4b7edb; text-decoration:none; border-radius:8px; font-weight:600; font-size:22px;">
-              
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <path d="M21.944 4.332c-.304-.254-.75-.305-1.11-.13L2.98 12.23c-.44.198-.716.64-.706 1.123.01.484.304.914.752 1.092l4.64 1.85 1.85 4.64c.178.448.608.742 1.092.752h.028c.473 0 .903-.275 1.101-.705l8.029-17.854c.176-.39.124-.839-.13-1.143ZM9.24 15.522l-.93 3.011-1.14-2.86 8.275-7.84-6.205 7.689Zm1.237 3.048-.728-1.824 2.37-2.936-1.642 4.76Zm-3.755-4.255-2.86-1.14 11.702-5.265-8.842 6.405Z"/>
-              </svg>
-
-              <span>Hubungkan Telegram</span>
-            </a>
-          </div>
-        {{/hasbot}}
+{{#hasbot}}
+  <div style="text-align:center; margin-bottom: 20px;">
+    <a href="{{connect_url}}" target="_blank" rel="noopener"
+      style="display:inline-flex; align-items:center; justify-content:center; gap:10px; min-width:380px; text-align:center; padding:16px 24px; background:#e8f3f3; color:#4b7edb; text-decoration:none; border-radius:6px; font-weight:700; font-size:18px;">
+      
+      <i class="fa-solid fa-paper-plane" style="font-size:20px; line-height:1; transform:rotate(-8deg);"></i>
+      <span>Hubungkan Telegram</span>
+    </a>
+  </div>
+{{/hasbot}}
 
         {{^hasbot}}
           <div class="alert alert-warning" style="margin-bottom:20px;">

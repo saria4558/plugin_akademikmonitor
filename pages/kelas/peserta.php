@@ -286,6 +286,161 @@ function local_akademikmonitor_peserta_enrol_user(
         groups_add_member($groupid, $userid);
     }
 }
+function local_akademikmonitor_peserta_get_generated_courses(stdClass $kelas): array {
+    global $DB;
+
+    $kelasid = (int)$kelas->id;
+    $tahunajaranid = !empty($kelas->id_tahun_ajaran) ? (int)$kelas->id_tahun_ajaran : 0;
+
+    if ($kelasid <= 0) {
+        return [];
+    }
+
+    $conditions = [];
+    $params = [];
+
+    /*
+     * Format lama yang spesifik:
+     * AM-K{idkelas}-KM{idkurikulummapel}-S{semester}
+     */
+    $conditions[] = $DB->sql_like('idnumber', ':oldpattern', false, false);
+    $params['oldpattern'] = 'AM-K' . $kelasid . '-KM%-S%';
+
+    /*
+     * Format lama yang lebih longgar.
+     * Ini menjaga kalau format idnumber lama ternyata punya tambahan berbeda.
+     */
+    $conditions[] = $DB->sql_like('idnumber', ':oldfallbackpattern', false, false);
+    $params['oldfallbackpattern'] = 'AM-K' . $kelasid . '-%';
+
+    /*
+     * Format baru yang spesifik:
+     * AM-TA{idtahunajaran}-K{idkelas}-KM{idkurikulummapel}-S{semester}
+     */
+    if ($tahunajaranid > 0) {
+        $conditions[] = $DB->sql_like('idnumber', ':newpattern', false, false);
+        $params['newpattern'] = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-KM%-S%';
+
+        /*
+         * Format baru yang lebih longgar untuk tahun ajaran yang sama.
+         */
+        $conditions[] = $DB->sql_like('idnumber', ':newwidepattern', false, false);
+        $params['newwidepattern'] = 'AM-TA' . $tahunajaranid . '-K' . $kelasid . '-%';
+    }
+
+    /*
+     * Fallback format baru tanpa mengunci tahun ajaran.
+     */
+    $conditions[] = $DB->sql_like('idnumber', ':fallbackpattern', false, false);
+    $params['fallbackpattern'] = 'AM-TA%-K' . $kelasid . '-%';
+
+    $sql = "SELECT id, fullname, shortname, idnumber
+              FROM {course}
+             WHERE " . implode(' OR ', $conditions) . "
+          ORDER BY fullname ASC";
+
+    return $DB->get_records_sql($sql, $params);
+}
+
+/**
+ * Keluarkan user dari course Moodle hasil generate kelas.
+ *
+ * Ini dipakai saat peserta dihapus dari kelas atau tidak dicentang lagi.
+ *
+ * Kenapa perlu?
+ * Karena menghapus dari tabel peserta_kelas hanya menghapus data plugin.
+ * Moodle masih punya data sendiri di:
+ * - user_enrolments
+ * - role_assignments
+ * - groups_members
+ *
+ * Kalau bagian ini tidak dibersihkan, siswa tetap muncul di Participants course
+ * dan tetap muncul di dashboard wali kelas.
+ */
+function local_akademikmonitor_peserta_remove_user_from_existing_courses(
+    stdClass $kelas,
+    int $userid,
+    int $roleid
+): int {
+    global $DB;
+
+    if ($userid <= 0 || $roleid <= 0) {
+        return 0;
+    }
+
+    $courses = local_akademikmonitor_peserta_get_generated_courses($kelas);
+
+    if (!$courses) {
+        return 0;
+    }
+
+    $manualplugin = enrol_get_plugin('manual');
+
+    if (!$manualplugin) {
+        return 0;
+    }
+
+    $removed = 0;
+
+    foreach ($courses as $course) {
+        $courseid = (int)$course->id;
+        $coursecontext = context_course::instance($courseid);
+
+        /*
+         * 1. Hapus dari group course.
+         *
+         * Ini penting karena fitur wali kelas biasanya membaca siswa dari group.
+         */
+        $groups = groups_get_all_groups($courseid, $userid);
+
+        foreach ($groups as $group) {
+            groups_remove_member((int)$group->id, $userid);
+        }
+
+        /*
+         * 2. Hapus role yang sesuai.
+         *
+         * Untuk siswa, roleid = student.
+         * Untuk wali kelas, roleid = role wali/teacher yang dipakai.
+         */
+        role_unassign($roleid, $userid, $coursecontext->id);
+
+        /*
+         * 3. Jangan langsung unenrol kalau user masih punya role lain.
+         *
+         * Ini supaya tidak merusak kasus user yang juga guru mapel
+         * atau punya role lain di course yang sama.
+         */
+        $stillhasrole = $DB->record_exists('role_assignments', [
+            'userid' => $userid,
+            'contextid' => $coursecontext->id,
+        ]);
+
+        if ($stillhasrole) {
+            $removed++;
+            continue;
+        }
+
+        /*
+         * 4. Kalau sudah tidak punya role apa pun, baru unenrol manual.
+         *
+         * Ini yang membuat user hilang dari halaman Participants.
+         */
+        $instances = enrol_get_instances($courseid, true);
+
+        foreach ($instances as $instance) {
+            if ($instance->enrol !== 'manual') {
+                continue;
+            }
+
+            $manualplugin->unenrol_user($instance, $userid);
+            $removed++;
+            break;
+        }
+    }
+
+    return $removed;
+}
 
 /**
  * Sinkron peserta kelas ke course yang sudah pernah digenerate.
@@ -311,12 +466,7 @@ function local_akademikmonitor_peserta_sync_existing_courses(
         return 0;
     }
 
-    $courses = $DB->get_records_sql(
-        "SELECT id, fullname, shortname, idnumber
-           FROM {course}
-          WHERE " . $DB->sql_like('idnumber', ':pattern', false, false),
-        ['pattern' => 'AM-K' . $kelasid . '-KM%-S%']
-    );
+    $courses = local_akademikmonitor_peserta_get_generated_courses($kelas);
 
     if (!$courses) {
         return 0;
@@ -600,8 +750,15 @@ if ($deleteid > 0) {
         'id_kelas' => $kelasid,
     ], '*', IGNORE_MISSING);
 
+    $removedfromcourses = 0;
+
     if ($deleted) {
-        if (!empty($kelas->id_user) && (int)$kelas->id_user === (int)$deleted->id_user) {
+        $deleteduserid = (int)$deleted->id_user;
+        $deletedroleid = !empty($deleted->id_role) ? (int)$deleted->id_role : $studentroleid;
+
+        $transaction = $DB->start_delegated_transaction();
+
+        if (!empty($kelas->id_user) && (int)$kelas->id_user === $deleteduserid) {
             $kelas->id_user = null;
             $DB->update_record('kelas', $kelas);
         }
@@ -610,11 +767,28 @@ if ($deleteid > 0) {
             'id' => $deleteid,
             'id_kelas' => $kelasid,
         ]);
+
+        $transaction->allow_commit();
+
+        /*
+         * Setelah data plugin dihapus, bersihkan juga data course Moodle.
+         */
+        $removedfromcourses = local_akademikmonitor_peserta_remove_user_from_existing_courses(
+            $kelas,
+            $deleteduserid,
+            $deletedroleid
+        );
+    }
+
+    $message = 'Peserta berhasil dihapus dari kelas.';
+
+    if ($removedfromcourses > 0) {
+        $message .= ' Peserta juga sudah dikeluarkan dari course Moodle yang tergenerate.';
     }
 
     redirect(
         new moodle_url('/local/akademikmonitor/pages/kelas/peserta.php', ['kelasid' => $kelasid]),
-        'Peserta berhasil dihapus dari kelas.',
+        $message,
         null,
         \core\output\notification::NOTIFY_SUCCESS
     );
@@ -668,16 +842,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $waliuserid = 0;
     }
 
-    // Validasi anti-duplikat lintas kelas pada tahun ajaran yang sama.
-    local_akademikmonitor_peserta_validate_no_duplicate(
-        $kelasid,
-        $tahunajaranid,
-        $waliuserid,
-        $siswauserids,
-        $studentroleid
-    );
+// Validasi anti-duplikat lintas kelas pada tahun ajaran yang sama.
+local_akademikmonitor_peserta_validate_no_duplicate(
+    $kelasid,
+    $tahunajaranid,
+    $waliuserid,
+    $siswauserids,
+    $studentroleid
+);
 
-    $transaction = $DB->start_delegated_transaction();
+/*
+ * Ambil peserta lama sebelum tabel peserta_kelas di-reset.
+ *
+ * Ini tidak mengubah fungsi lama.
+ * Ini hanya dipakai untuk tahu siapa yang sebelumnya ada,
+ * tetapi sekarang sudah tidak dicentang lagi.
+ */
+$oldpesertas = $DB->get_records('peserta_kelas', ['id_kelas' => $kelasid], 'id ASC');
+
+$oldstudentids = [];
+$oldwaliids = [];
+
+foreach ($oldpesertas as $oldpeserta) {
+    $olduserid = (int)$oldpeserta->id_user;
+    $oldroleid = !empty($oldpeserta->id_role) ? (int)$oldpeserta->id_role : 0;
+
+    if ($olduserid <= 0) {
+        continue;
+    }
+
+    if ($oldroleid === $studentroleid) {
+        $oldstudentids[$olduserid] = $olduserid;
+    }
+
+    if ($walikelasroleid > 0 && $oldroleid === $walikelasroleid) {
+        $oldwaliids[$olduserid] = $olduserid;
+    }
+}
+
+$transaction = $DB->start_delegated_transaction();
 
     // Reset peserta kelas agar data lama teacher yang pernah tersimpan ikut bersih.
     $DB->delete_records('peserta_kelas', ['id_kelas' => $kelasid]);
@@ -708,16 +911,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         local_akademikmonitor_peserta_upsert($kelasid, $userid, $studentroleid);
     }
 
-    $transaction->allow_commit();
+$transaction->allow_commit();
 
-    $synced = local_akademikmonitor_peserta_sync_existing_courses(
-        $kelas,
-        $studentroleid,
-        $teacherroleid,
-        $walikelasroleid
-    );
+/*
+ * Bersihkan peserta lama yang sekarang sudah tidak dipilih.
+ *
+ * Contoh:
+ * - Selvi sebelumnya siswa kelas XII RPL 2.
+ * - Sekarang checkbox Selvi tidak dicentang.
+ * - Maka Selvi dikeluarkan juga dari semua course hasil generate kelas itu.
+ */
+$newstudentids = [];
 
-    $message = 'Pengaturan peserta kelas berhasil disimpan.';
+foreach ($siswauserids as $userid) {
+    $userid = (int)$userid;
+
+    if ($userid > 0 && $userid !== $waliuserid) {
+        $newstudentids[$userid] = $userid;
+    }
+}
+
+$removedfromcourses = 0;
+
+foreach ($oldstudentids as $olduserid) {
+    if (!isset($newstudentids[$olduserid])) {
+        $removedfromcourses += local_akademikmonitor_peserta_remove_user_from_existing_courses(
+            $kelas,
+            (int)$olduserid,
+            $studentroleid
+        );
+    }
+}
+
+/*
+ * Kalau wali kelas lama diganti/dikosongkan, role wali kelas lama juga
+ * dibersihkan dari course hasil generate kelas.
+ */
+$newwaliids = [];
+
+if ($waliuserid > 0) {
+    $newwaliids[$waliuserid] = $waliuserid;
+}
+
+foreach ($oldwaliids as $olduserid) {
+    if (!isset($newwaliids[$olduserid])) {
+        $removedfromcourses += local_akademikmonitor_peserta_remove_user_from_existing_courses(
+            $kelas,
+            (int)$olduserid,
+            $walikelasroleid
+        );
+    }
+}
+
+$synced = local_akademikmonitor_peserta_sync_existing_courses(
+    $kelas,
+    $studentroleid,
+    $teacherroleid,
+    $walikelasroleid
+);
+
+$message = 'Pengaturan peserta kelas berhasil disimpan.';
+
+if ($removedfromcourses > 0) {
+    $message .= ' Peserta lama yang tidak dipilih juga sudah dikeluarkan dari course Moodle.';
+}
 
     if ($synced > 0) {
         $message .= ' Siswa dan wali kelas juga sudah disinkronkan ke course Moodle yang sudah digenerate.';
