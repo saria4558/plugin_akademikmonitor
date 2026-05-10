@@ -762,7 +762,7 @@ $html .= '
 
 if ($showpkl) {
     $html .= '
-    <h3>PKL</h3>
+    <h3>Praktik Kerja Lapangan</h3>
     <table>
         <tr><th>No</th><th>Mitra</th><th>Nilai</th></tr>';
 
