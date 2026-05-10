@@ -293,85 +293,9 @@ function xmldb_local_akademikmonitor_upgrade($oldversion) {
 
 if ($oldversion < 2026040202) {
 
-    // =========================
-    // 1. CEK / INSERT JURUSAN
-    // =========================
-    $jurusan = $DB->get_record('jurusan', ['nama_jurusan' => 'TOI']);
-
-    if (!$jurusan) {
-        $jurusanid = $DB->insert_record('jurusan', [
-            'nama_jurusan' => 'TOI',
-            'kode_jurusan' => 999
-        ]);
-    } else {
-        $jurusanid = $jurusan->id;
-    }
-
-    // =========================
-    // 2. AMBIL KURIKULUM & TA
-    // =========================
-    $kurikulum = $DB->get_record('kurikulum', ['is_active' => 1]);
-    $tas = $DB->get_records('tahun_ajaran');
-    $ta = reset($tas);
-
-    // =========================
-    // 3. CEK / INSERT kurikulum_jurusan
-    // =========================
-    $kj = $DB->get_record('kurikulum_jurusan', [
-        'id_jurusan' => $jurusanid,
-        'id_kurikulum' => $kurikulum->id,
-        'id_tahun_ajaran' => $ta->id
-    ]);
-
-    if (!$kj) {
-        $kjid = $DB->insert_record('kurikulum_jurusan', [
-            'id_jurusan' => $jurusanid,
-            'id_kurikulum' => $kurikulum->id,
-            'id_tahun_ajaran' => $ta->id
-        ]);
-    } else {
-        $kjid = $kj->id;
-    }
-
-    // =========================
-    // 4. COPY MAPEL DARI RPL
-    // =========================
-    $rpl = $DB->get_record('jurusan', ['nama_jurusan' => 'RPL']);
-
-    if ($rpl) {
-
-        $rplkj = $DB->get_record('kurikulum_jurusan', [
-            'id_jurusan' => $rpl->id,
-            'id_kurikulum' => $kurikulum->id,
-            'id_tahun_ajaran' => $ta->id
-        ]);
-
-        if ($rplkj) {
-
-            $mapels = $DB->get_records('kurikulum_mapel', [
-                'id_kurikulum_jurusan' => $rplkj->id
-            ]);
-
-            foreach ($mapels as $m) {
-
-                $exists = $DB->record_exists('kurikulum_mapel', [
-                    'id_kurikulum_jurusan' => $kjid,
-                    'id_mapel' => $m->id_mapel,
-                    'tingkat_kelas' => $m->tingkat_kelas
-                ]);
-
-                if (!$exists) {
-                    $DB->insert_record('kurikulum_mapel', [
-                        'id_kurikulum_jurusan' => $kjid,
-                        'id_mapel' => $m->id_mapel,
-                        'tingkat_kelas' => $m->tingkat_kelas,
-                        'kktp' => $m->kktp
-                    ]);
-                }
-            }
-        }
-    }
-
+    // Tidak ada seeding/dummy data pada upgrade ini.
+    // Sebelumnya blok ini membuat jurusan TOI dan menyalin mapel dari RPL secara otomatis.
+    // Untuk instalasi produksi, semua data akademik harus dibuat dari menu admin/Moodle, bukan dari upgrade.
     upgrade_plugin_savepoint(true, 2026040202, 'local', 'akademikmonitor');
 }
 
